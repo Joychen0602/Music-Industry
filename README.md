@@ -36,11 +36,7 @@ The repository includes the processed music revenue dataset (`musicdata.csv`). N
 
 ## Execution
 
-### Option 1: Open Directly
-
-Open `index.html` in a web browser.
-
-### Option 2: Local Web Server (Recommended)
+### Option 1: Local Web Server (Recommended)
 
 Using Python:
 
@@ -56,7 +52,7 @@ http://localhost:8000
 
 in a web browser.
 
-### Using Visual Studio Code
+### Option 2: Using Visual Studio Code
 
 Install the Live Server extension and open `index.html` using Live Server.
 
