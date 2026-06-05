@@ -123,7 +123,92 @@ main {
 }
 
 .viz {
+  position: relative;
   min-height: 320px;
+}
+
+.chart-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: #b8a8e8;
+}
+
+.chart-hint__icon {
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #c4b5fd;
+}
+
+.donut-tooltip,
+.dashboard-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(188, 140, 255, 0.45);
+  background: rgba(18, 12, 42, 0.94);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: #eef2ff;
+  line-height: 1.45;
+}
+
+.donut-tooltip__title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.donut-tooltip__share {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f8f4ff;
+  margin-bottom: 0.35rem;
+}
+
+.donut-tooltip__note {
+  font-size: 0.82rem;
+  color: #c4b5fd;
+  font-style: italic;
+  border-top: 1px solid rgba(188, 140, 255, 0.25);
+  padding-top: 0.45rem;
+  margin-top: 0.2rem;
+}
+
+.dashboard-tooltip__title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+}
+
+.dashboard-tooltip__revenue,
+.dashboard-tooltip__year {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #f8f4ff;
+  margin-bottom: 0.2rem;
+}
+
+.dashboard-tooltip__recap-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ded6ff;
+  margin-top: 0.55rem;
+  margin-bottom: 0.25rem;
+  border-top: 1px solid rgba(188, 140, 255, 0.25);
+  padding-top: 0.45rem;
+}
+
+.dashboard-tooltip__recap {
+  font-size: 0.82rem;
+  color: #c4b5fd;
+  font-style: italic;
+  line-height: 1.5;
 }
 
 .replay-btn {
