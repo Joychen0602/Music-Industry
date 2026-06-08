@@ -1,4 +1,4 @@
-# Music Industry Transformation: From Vinyl to Streaming
+# Music Industry Transformation
 
 ## Description
 
