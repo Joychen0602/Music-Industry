@@ -55,3 +55,9 @@ in a web browser.
 ### Option 2: Using Visual Studio Code
 
 Install the Live Server extension and open `index.html` using Live Server.
+
+Install the **Live Server** extension:
+- Click the **Extensions** icon in the left sidebar (or press `Ctrl+Shift+X` on Windows/Linux, `Cmd+Shift+X` on Mac).
+- Search for **"Live Server"**.
+- Install the extension published by **Ritwick Dey**.
+
