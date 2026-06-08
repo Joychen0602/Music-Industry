@@ -56,8 +56,9 @@ in a web browser.
 
 Install the Live Server extension and open `index.html` using Live Server.
 
-Install the **Live Server** extension:
-- Click the **Extensions** icon in the left sidebar (or press `Ctrl+Shift+X` on Windows/Linux, `Cmd+Shift+X` on Mac).
+1. Install the **Live Server** extension:
+- Click the **Extensions** icon in the left sidebar.
 - Search for **"Live Server"**.
-- Install the extension published by **Ritwick Dey**.
+- Install the extension
 
+2. Right-click the HTML file and select: Open with Live Serve
