@@ -13,7 +13,7 @@ Music-Industry/
 ├── main.html               # Main webpage
 ├── style.css               # Website styling
 ├── script.js               # Visualization and interaction logic
-├── music_data.csv           # Music industry revenue dataset
+├── music_data.csv          # Music industry revenue dataset
 └── README.md               # Project documentation
 ```
 
@@ -21,7 +21,7 @@ Music-Industry/
 
 ### Prerequisites
 
-The project is a client-side web application built with HTML, CSS, JavaScript, and D3.js. No additional software installation is required beyond a modern web browser.
+The project is a client-side web application built with HTML, CSS, JavaScript, and D3.js. No additional software installation is required beyond the web browser.
 
 ### Clone the Repository
 
