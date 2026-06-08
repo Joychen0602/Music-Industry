@@ -1,5 +1,14 @@
+/**
+ * Music Industry Storytelling — D3 visualization logic.
+ *
+ * Data flow: music_data.csv (long RIAA rows) → loadStoryData() 
+ * 
+ */
+
+// Canonical format categories used as stack keys and chart series
 const formatOrder = ["Vinyl", "Tape", "CD / Disc", "Digital Download", "Streaming"];
 
+// labels for tooltips, legends, and dashboard chips
 const labels = {
   Vinyl: "Vinyl",
   Tape: "Tape",
@@ -12,6 +21,7 @@ const labels = {
   Access: "Access (Stream)"
 };
 
+// Color palette keyed 
 const colors = {
   Vinyl: "#f97316",
   Tape: "#22c55e",
@@ -28,62 +38,83 @@ const colors = {
 let cachedData = null;
 let resizeTimer = null;
 
-function classifyFormat(rawFormat) {
-  const f = String(rawFormat).toLowerCase();
-  if (f.includes("lp/ep") || f.includes("vinyl")) return "Vinyl";
-  if (f.includes("cassette") || f.includes("8 - track") || f.includes("other tapes") || f.includes("tape")) return "Tape";
-  if (f.includes("cd") || f.includes("disc") || f.includes("sacd")) return "CD / Disc";
-  if (f.includes("download") || f.includes("kiosk") || f.includes("ringtones") || f.includes("other digital")) return "Digital Download";
-  if (f.includes("streaming") || f.includes("subscription") || f.includes("soundexchange") || f.includes("on-demand")) return "Streaming";
+/**
+ * Maps RIAA format strings to one of five canonical categories.
+ * Uses substring matching because the source CSV has inconsistent naming
+ * Returns null for rows we intentionally exclude, such as Synchronization revenue.
+ */
+function classifyFormat(riaaFormatName) {
+  const normalizedFormat = String(riaaFormatName).toLowerCase();
+  if (normalizedFormat.includes("lp/ep") || normalizedFormat.includes("vinyl")) return "Vinyl";
+  if (normalizedFormat.includes("cassette") || normalizedFormat.includes("8 - track") || normalizedFormat.includes("other tapes") || normalizedFormat.includes("tape")) return "Tape";
+  if (normalizedFormat.includes("cd") || normalizedFormat.includes("disc") || normalizedFormat.includes("sacd")) return "CD / Disc";
+  if (normalizedFormat.includes("download") || normalizedFormat.includes("kiosk") || normalizedFormat.includes("ringtones") || normalizedFormat.includes("other digital")) return "Digital Download";
+  if (normalizedFormat.includes("streaming") || normalizedFormat.includes("subscription") || normalizedFormat.includes("soundexchange") || normalizedFormat.includes("on-demand")) return "Streaming";
   return null;
 }
 
-function toNumeric(v) {
-  if (!v) return 0;
-  return (Number.parseFloat(String(v).replace(/[^0-9.-]+/g, "")) / 1e9) || 0;
+// Parses a dollar string from the CSV and converts it to billions of USD
+function parseRevenueToBillions(revenueString) {
+  if (!revenueString) return 0;
+  return (Number.parseFloat(String(revenueString).replace(/[^0-9.-]+/g, "")) / 1e9) || 0;
 }
 
+/**
+ * Loads RIAA data and pivots from long format (one row per format per year)
+ * to wide format (one object per year with a property per format).
+ *
+ * Derived fields per year:
+ * - TotalCPI: sum of inflation-adjusted revenue across the five formats
+ * - TotalRaw: sum of nominal revenue across the five formats
+ * - Ownership: all non-streaming CPI-adjusted revenue
+ * - Access: streaming-only CPI-adjusted revenue
+ */
 async function loadStoryData() {
   const response = await fetch("./music_data.csv");
   const text = await response.text();
-  const raw = text.includes("\t") ? d3.tsvParse(text) : d3.csvParse(text);
+  const csvRows = text.includes("\t") ? d3.tsvParse(text) : d3.csvParse(text);
 
-  const headers = Object.keys(raw[0]);
-  const yearCol = headers.find(k => k.toLowerCase().includes("year"));
-  const formatCol = headers.find(k => k.toLowerCase().includes("format") && !k.toLowerCase().includes("format2"));
-  const cpiCol = headers.find(k => k.toLowerCase().includes("cpi"));
-  const rawCol = headers.find(k => k.toLowerCase() === "revenue" || k.toLowerCase() === "value");
+  // Column names vary slightly across exports; resolve them dynamically.
+  const headers = Object.keys(csvRows[0]);
+  const yearColumn = headers.find(k => k.toLowerCase().includes("year"));
+  const formatColumn = headers.find(k => k.toLowerCase().includes("format") && !k.toLowerCase().includes("format2"));
+  const cpiAdjustedColumn = headers.find(k => k.toLowerCase().includes("cpi"));
+  const nominalRevenueColumn = headers.find(k => k.toLowerCase() === "revenue" || k.toLowerCase() === "value");
 
-  const byYear = d3.group(raw, (d) => Number.parseInt(d[yearCol], 10));
-  const wideData = [];
+  const rowsByYear = d3.group(csvRows, (row) => Number.parseInt(row[yearColumn], 10));
+  const yearlyData = [];
 
-  byYear.forEach((rows, year) => {
+  rowsByYear.forEach((rowsForYear, year) => {
     if (!year) return;
-    const point = { Year: year, TotalCPI: 0, TotalRaw: 0, Ownership: 0, Access: 0 };
-    formatOrder.forEach(k => point[k] = 0);
 
-    rows.forEach((r) => {
-      if (r[formatCol] && String(r[formatCol]).toLowerCase() === "total") return;
-      
-      const category = classifyFormat(r[formatCol]);
-      if (category) {
-        const cpiVal = toNumeric(r[cpiCol]);
-        const rawVal = toNumeric(r[rawCol]);
-        
-        point[category] += cpiVal;
-        point.TotalCPI += cpiVal;
-        point.TotalRaw += rawVal;
-        
-        if (category === "Streaming") point.Access += cpiVal;
-        else point.Ownership += cpiVal;
+    const yearPoint = { Year: year, TotalCPI: 0, TotalRaw: 0, Ownership: 0, Access: 0 };
+    formatOrder.forEach(formatKey => yearPoint[formatKey] = 0);
+
+    rowsForYear.forEach((row) => {
+    
+      if (row[formatColumn] && String(row[formatColumn]).toLowerCase() === "total") return;
+
+      const formatCategory = classifyFormat(row[formatColumn]);
+      if (formatCategory) {
+        const adjustedRevenue = parseRevenueToBillions(row[cpiAdjustedColumn]);
+        const nominalRevenue = parseRevenueToBillions(row[nominalRevenueColumn]);
+
+        yearPoint[formatCategory] += adjustedRevenue;
+        yearPoint.TotalCPI += adjustedRevenue;
+        yearPoint.TotalRaw += nominalRevenue;
+
+        // Ownership vs. access is a narrative split, not an RIAA category.
+        if (formatCategory === "Streaming") yearPoint.Access += adjustedRevenue;
+        else yearPoint.Ownership += adjustedRevenue;
       }
     });
-    wideData.push(point);
+    yearlyData.push(yearPoint);
   });
 
-  return wideData.sort((a, b) => a.Year - b.Year);
+  return yearlyData.sort((a, b) => a.Year - b.Year);
 }
 
+// Draws horizontal grid, vertical grid, and labeled x/y axes on an SVG. 
 function drawAxes(svg, xScale, yScale, width, height, margin) {
   svg.append("g").attr("class", "grid").attr("transform", `translate(0,${height - margin.bottom})`)
     .call(d3.axisBottom(xScale).ticks(6).tickSize(-(height - margin.top - margin.bottom)).tickFormat(() => ""));
@@ -95,6 +126,7 @@ function drawAxes(svg, xScale, yScale, width, height, margin) {
     .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => "$" + d));
 }
 
+// Clears a chart container and returns a fresh SVG with its dimensions. 
 function createSvg(containerId, minHeight = 340) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
@@ -104,25 +136,34 @@ function createSvg(containerId, minHeight = 340) {
   return { svg, width, height, container: d3.select(container) };
 }
 
+/**
+ * Reveals chart lines left-to-right using a clip-path wipe animation.
+ * Elements with .delayed-label and .delayed-interactivity stay hidden/disabled
+ * until the wipe finishes so users cannot hover before the story beat plays.
+ */
 function setupAnimation(svg, container, paths, width, height, margin, duration = 4000) {
-  const clipId = `clip-${Math.random().toString(36).substr(2, 9)}`;
+  const clipId = `clip-${Math.random().toString(36).slice(2, 11)}`;
   const clipRect = svg.append("clipPath").attr("id", clipId).append("rect")
     .attr("x", margin.left).attr("y", margin.top).attr("width", 0).attr("height", height - margin.top - margin.bottom);
-  
+
   paths.attr("clip-path", `url(#${clipId})`);
   const delayedElements = svg.selectAll(".delayed-label").attr("opacity", 0);
-  const btn = container.append("button").attr("class", "play-overlay").text("▶ Play Animation");
+  const playButton = container.append("button").attr("class", "play-overlay").text("▶ Play Animation");
 
-  btn.on("click", () => {
-    btn.style("display", "none");
+  playButton.on("click", () => {
+    playButton.style("display", "none");
     clipRect.transition().duration(duration).ease(d3.easeLinear).attr("width", width - margin.left - margin.right)
       .on("end", () => {
-         delayedElements.transition().duration(800).attr("opacity", 1);
-         svg.selectAll(".delayed-interactivity").style("pointer-events", "all");
+          delayedElements.transition().duration(800).attr("opacity", 1);
+          svg.selectAll(".delayed-interactivity").style("pointer-events", "all");
       });
   });
 }
 
+/**
+ * Adds a crosshair and HTML tooltip that snap to the nearest year on mousemove.
+ * When isDelayed is true, pointer events are disabled until setupAnimation completes.
+ */
 function addHoverTooltip(svg, container, width, height, margin, data, formatKeys, isDelayed = false) {
   container.style("position", "relative");
   const tooltip = container.append("div").attr("class", "viz-tooltip").style("opacity", 0);
@@ -162,9 +203,9 @@ function addHoverTooltip(svg, container, width, height, margin, data, formatKeys
         const val = currentData[key];
         if (val > 0) {
             html += `<div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
-                       <span style="display:inline-block; width:10px; height:10px; background:${colors[key] || colors.Other}; margin-right:8px; border-radius:50%;"></span>
-                       <span>${labels[key] || key}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
-                     </div>`;
+                      <span style="display:inline-block; width:10px; height:10px; background:${colors[key] || colors.Other}; margin-right:8px; border-radius:50%;"></span>
+                      <span>${labels[key] || key}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
+                    </div>`;
         }
     });
     html += `</div>`;
@@ -181,6 +222,9 @@ function addHoverTooltip(svg, container, width, height, margin, data, formatKeys
   });
 }
 
+// --- Story section charts  ---
+
+// compares nominal vs. inflation-adjusted total industry revenue
 function renderHookChart(data) {
   const c = createSvg("hook-chart");
   if (!c) return;
@@ -213,6 +257,7 @@ function renderHookChart(data) {
   addHoverTooltip(svg, container, width, height, margin, data, ["TotalCPI", "TotalRaw"], true);
 }
 
+// Section 1: vinyl resurgence plotted against cassette/tape revenue
 function renderVinylRebirth(data) {
   const c = createSvg("vinyl-rebirth");
   if (!c) return;
@@ -244,7 +289,8 @@ function renderVinylRebirth(data) {
   addHoverTooltip(svg, container, width, height, margin, data, ["Vinyl", "Tape"]);
 }
 
-function renderCdPeak(data) {
+// Section 2: CD revenue peak in 1999 against total industry
+function renderCDPeak(data) {
   const c = createSvg("cd-peak");
   if (!c) return;
   const { svg, width, height, container } = c;
@@ -276,6 +322,7 @@ function renderCdPeak(data) {
   addHoverTooltip(svg, container, width, height, margin, data, ["TotalCPI", "CD / Disc"]);
 }
 
+//Section 3: digital download rise and fall
 function renderDownloadMountain(data) {
   const c = createSvg("download-mountain");
   if (!c) return;
@@ -306,6 +353,7 @@ function renderDownloadMountain(data) {
   addHoverTooltip(svg, container, width, height, margin, filtered, ["Digital Download"]);
 }
 
+// Section 4: ownership vs. access
 function renderOwnershipAccess(data) {
   const c = createSvg("ownership-access");
   if (!c) return;
@@ -350,6 +398,7 @@ function renderOwnershipAccess(data) {
   addHoverTooltip(svg, container, width, height, margin, filtered, ["Ownership", "Access"]);
 }
 
+//Final section: stacked area chart
 function renderStackedArea(data) {
   const c = createSvg("stacked-area");
   if (!c) return;
@@ -366,7 +415,7 @@ function renderStackedArea(data) {
 
   const paths = svg.append("g").selectAll("path").data(series).join("path").attr("fill", d => colors[d.key]).attr("opacity", 0.85).attr("d", area);
 
-  const clipId = `clip-stacked-${Math.random().toString(36).substr(2, 9)}`;
+  const clipId = `clip-stacked-${Math.random().toString(36).slice(2, 11)}`;
   const clipRect = svg.append("clipPath").attr("id", clipId).append("rect")
     .attr("x", margin.left).attr("y", margin.top).attr("width", 0).attr("height", height - margin.top - margin.bottom);
   paths.attr("clip-path", `url(#${clipId})`);
@@ -377,6 +426,7 @@ function renderStackedArea(data) {
 
   const replayButton = container.append("button").attr("class", "replay-btn").text("▶ Play 50-Year History");
 
+  // Animates the clip reveal while updating a scrubber line and era label.
   function runStackedAnimation() {
     clipRect.interrupt();
     replayButton.style("display", "none");
@@ -385,24 +435,25 @@ function renderStackedArea(data) {
     clipRect.attr("width", 0);
     const startYear = d3.min(data, d => d.Year);
     const endYear = d3.max(data, d => d.Year);
-    
+
     clipRect.transition().duration(8000).ease(d3.easeLinear)
       .attrTween("width", function() {
         const totalWidth = width - margin.left - margin.right;
-        return function(t) {
-          const currentYear = Math.round(startYear + t * (endYear - startYear));
+        return function(progress) {
+          const currentYear = Math.round(startYear + progress * (endYear - startYear));
           const currentX = x(currentYear);
-          
+
           yearLabel.text(currentYear);
           marker.attr("x1", currentX).attr("x2", currentX);
 
+          // Era breakpoints mirror the narrative sections in index.html.
           if (currentYear < 1980) eraLabel.text("Vinyl Era").attr("fill", colors.Vinyl);
           else if (currentYear < 1990) eraLabel.text("Tape Era").attr("fill", colors.Tape);
           else if (currentYear < 2005) eraLabel.text("CD Dominance").attr("fill", colors["CD / Disc"]);
           else if (currentYear < 2015) eraLabel.text("Digital Transition").attr("fill", colors["Digital Download"]);
           else eraLabel.text("Streaming Era").attr("fill", colors.Streaming);
 
-          return t * totalWidth;
+          return progress * totalWidth;
         };
       })
       .on("end", () => {
@@ -422,17 +473,22 @@ function renderStackedArea(data) {
   });
 }
 
+/**
+ * Interactive dashboard: multi-select format chips, line chart, and donut pie.
+ * Line chart uses CPI-adjusted per-format values; pie center shows nominal TotalRaw.
+ * The "Other Formats" slice fills the gap between selected formats and total nominal revenue.
+ */
 function renderDashboard(data) {
   const controls = d3.select("#controls");
   controls.html("");
-  const selected = new Set(["Vinyl", "CD / Disc", "Streaming"]);
+  const selectedFormats = new Set(["Vinyl", "CD / Disc", "Streaming"]);
   
-  formatOrder.forEach((f) => {
-    controls.append("button").attr("class", `chip ${selected.has(f) ? "active" : ""}`).text(labels[f]).on("click", function () {
-        if (selected.has(f)) selected.delete(f);
-        else selected.add(f);
-        d3.select(this).classed("active", selected.has(f));
-        draw(selected); 
+  formatOrder.forEach((formatName) => {
+    controls.append("button").attr("class", `chip ${selectedFormats.has(formatName) ? "active" : ""}`).text(labels[formatName]).on("click", function () {
+        if (selectedFormats.has(formatName)) selectedFormats.delete(formatName);
+        else selectedFormats.add(formatName);
+        d3.select(this).classed("active", selectedFormats.has(formatName));
+        drawLineChart(selectedFormats);
       });
   });
 
@@ -472,45 +528,47 @@ function renderDashboard(data) {
   const pieCenterYear = pieGroup.append("text").attr("text-anchor", "middle").attr("y", -5).attr("font-size", "24px").attr("font-weight", "bold").attr("fill", "#fff");
   const pieCenterTotal = pieGroup.append("text").attr("text-anchor", "middle").attr("y", 15).attr("font-size", "12px").attr("fill", "#afbddf");
 
-  function draw(activeFormats) {
-    const entries = [...activeFormats];
-    
-    const maxVal = entries.length > 0 ? d3.max(data, d => d3.max(entries, k => d[k])) : 1;
-    y.domain([0, maxVal * 1.1]); 
+  function drawLineChart(activeFormats) {
+    const activeFormatList = [...activeFormats];
+
+    const maxRevenue = activeFormatList.length > 0 ? d3.max(data, d => d3.max(activeFormatList, formatKey => d[formatKey])) : 1;
+    y.domain([0, maxRevenue * 1.1]);
 
     xAxisGroup.call(d3.axisBottom(x).ticks(6).tickFormat(d3.format("d")));
     yAxisGroup.transition().duration(500).call(d3.axisLeft(y).ticks(5).tickFormat(d => "$" + d));
     yGridGroup.transition().duration(500).call(d3.axisLeft(y).ticks(5).tickSize(-(lineChartWidth - margin.left - margin.right)).tickFormat(() => ""));
 
-    const group = linesGroup.selectAll("path.dashboard-line").data(entries, d => d);
+    const group = linesGroup.selectAll("path.dashboard-line").data(activeFormatList, formatKey => formatKey);
     group.join(
-      enter => enter.append("path").attr("class", "dashboard-line").attr("fill", "none").attr("stroke-width", 3).attr("stroke", d => colors[d]).attr("d", key => d3.line().x(d => x(d.Year)).y(d => y(d[key])).curve(d3.curveMonotoneX)(data)).style("opacity", 0).call(enter => enter.transition().duration(500).style("opacity", 1)),
-      update => update.transition().duration(500).attr("stroke", d => colors[d]).attr("d", key => d3.line().x(d => x(d.Year)).y(d => y(d[key])).curve(d3.curveMonotoneX)(data)),
+      enter => enter.append("path").attr("class", "dashboard-line").attr("fill", "none").attr("stroke-width", 3).attr("stroke", formatKey => colors[formatKey]).attr("d", formatKey => d3.line().x(d => x(d.Year)).y(d => y(d[formatKey])).curve(d3.curveMonotoneX)(data)).style("opacity", 0).call(enter => enter.transition().duration(500).style("opacity", 1)),
+      update => update.transition().duration(500).attr("stroke", formatKey => colors[formatKey]).attr("d", formatKey => d3.line().x(d => x(d.Year)).y(d => y(d[formatKey])).curve(d3.curveMonotoneX)(data)),
       exit => exit.transition().duration(300).style("opacity", 0).remove()
     );
-    
-    updatePie(data[data.length - 1], entries);
+
+    // Default pie view shows the most recent year until the user drags the scrubber.
+    updatePieChart(data[data.length - 1], activeFormatList);
   }
 
-  function updatePie(yearData, activeFormats) {
-    let activeSum = 0;
-    const pieData = [];
-    
-    activeFormats.forEach(key => {
-      const val = yearData[key];
-      if (val > 0) {
-        pieData.push({ label: key, value: val, color: colors[key] });
-        activeSum += val;
+  function updatePieChart(yearData, activeFormats) {
+    let selectedFormatsRevenue = 0;
+    const pieSlices = [];
+
+    activeFormats.forEach(formatKey => {
+      const formatRevenue = yearData[formatKey];
+      if (formatRevenue > 0) {
+        pieSlices.push({ label: formatKey, value: formatRevenue, color: colors[formatKey] });
+        selectedFormatsRevenue += formatRevenue;
       }
     });
-    
-    const otherValue = yearData.TotalRaw - activeSum;
-    if (otherValue > 0.01) pieData.push({ label: "Other Formats", value: otherValue, color: colors.Other });
+
+    // Remaining nominal revenue not covered by the selected format lines.
+    const unselectedRevenue = yearData.TotalRaw - selectedFormatsRevenue;
+    if (unselectedRevenue > 0.01) pieSlices.push({ label: "Other Formats", value: unselectedRevenue, color: colors.Other });
     
     pieCenterYear.text(yearData.Year);
     pieCenterTotal.text(`Total: $${yearData.TotalRaw.toFixed(1)}B`);
 
-    const slices = pieGroup.selectAll("path.slice").data(pieGenerator(pieData), d => d.data.label)
+    const slices = pieGroup.selectAll("path.slice").data(pieGenerator(pieSlices), d => d.data.label)
       .join(
         enter => enter.append("path").attr("class", "slice").attr("fill", d => d.data.color).attr("d", arcGenerator).attr("stroke", "#0a0b10").attr("stroke-width", 2).style("cursor", "pointer"),
         update => update.attr("d", arcGenerator),
@@ -519,17 +577,17 @@ function renderDashboard(data) {
 
     slices
       .on("mousemove", function(event, d) {
-        const total = d3.sum(pieData, p => p.value);
+        const total = d3.sum(pieSlices, slice => slice.value);
         const pct = ((d.data.value / total) * 100).toFixed(1);
         
         let html = `<strong style="color: #fff; font-size: 1.1rem;">${labels[d.data.label] || d.data.label}</strong><br/>
                     <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
                       <div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
-                         <span style="display:inline-block; width:10px; height:10px; background:${d.data.color}; margin-right:8px; border-radius:50%;"></span>
-                         <span>Revenue: <b style="color: #fff;">$${d.data.value.toFixed(2)}B</b></span>
+                        <span style="display:inline-block; width:10px; height:10px; background:${d.data.color}; margin-right:8px; border-radius:50%;"></span>
+                        <span>Revenue: <b style="color: #fff;">$${d.data.value.toFixed(2)}B</b></span>
                       </div>
                       <div style="color: #e2e8f0; font-size: 0.95rem; padding-left: 18px;">
-                         Market Share: <b style="color: #fff;">${pct}%</b>
+                        Market Share: <b style="color: #fff;">${pct}%</b>
                       </div>
                     </div>`;
                     
@@ -548,13 +606,14 @@ function renderDashboard(data) {
       });
   }
 
-  draw(selected);
+  drawLineChart(selectedFormats);
 
   const bisectYear = d3.bisector(d => d.Year).left;
 
+  // Dragging across the line chart scrubs the year and updates the pie in sync.
   const dragScrubber = d3.drag()
     .on("start drag", (event) => {
-      if (selected.size === 0) return; 
+      if (selectedFormats.size === 0) return;
 
       const clampedX = Math.max(margin.left, Math.min(event.x, lineChartWidth - margin.right));
       const x0 = x.invert(clampedX);
@@ -569,9 +628,9 @@ function renderDashboard(data) {
 
       crosshair.attr("x1", currentX).attr("x2", currentX).style("opacity", 0.6);
 
-      updatePie(currentData, [...selected]);
+      updatePieChart(currentData, [...selectedFormats]);
 
-      const activeSorted = [...selected].sort((a, b) => currentData[b] - currentData[a]);
+      const activeSorted = [...selectedFormats].sort((a, b) => currentData[b] - currentData[a]);
       let html = `<strong style="color: #fff; font-size: 1.1rem;">Year: ${currentData.Year}</strong><br/>
                   <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">`;
       
@@ -579,9 +638,9 @@ function renderDashboard(data) {
           const val = currentData[key];
           if (val > 0) {
               html += `<div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
-                         <span style="display:inline-block; width:10px; height:10px; background:${colors[key]}; margin-right:8px; border-radius:50%;"></span>
-                         <span>${labels[key]}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
-                       </div>`;
+                        <span style="display:inline-block; width:10px; height:10px; background:${colors[key]}; margin-right:8px; border-radius:50%;"></span>
+                        <span>${labels[key]}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
+                      </div>`;
           }
       });
       html += `</div>`;
@@ -595,6 +654,7 @@ function renderDashboard(data) {
   overlay.style("cursor", "ew-resize").call(dragScrubber);
 }
 
+// Fades and shifts story sections as they enter the viewport
 function activateOnScroll() {
   const sections = document.querySelectorAll(".story-section");
   const observer = new IntersectionObserver((entries) => {
@@ -614,16 +674,17 @@ async function init() {
   cachedData = await loadStoryData();
   renderAllCharts(cachedData);
   activateOnScroll();
-  
-  const startBtn = document.getElementById("start-btn");
-  if (startBtn) {
-    startBtn.addEventListener("click", (e) => {
-      e.preventDefault();
+
+  const startButton = document.getElementById("start-btn");
+  if (startButton) {
+    startButton.addEventListener("click", (event) => {
+      event.preventDefault();
       document.body.classList.remove("scroll-locked");
       document.querySelector("#section-hook").scrollIntoView({ behavior: "smooth" });
     });
   }
 
+  // Debounce resize to avoid re-rendering every pixel of a window drag.
   window.addEventListener("resize", () => {
     if (!cachedData) return;
     clearTimeout(resizeTimer);
@@ -633,11 +694,12 @@ async function init() {
 
 window.addEventListener("DOMContentLoaded", init);
 
+// Re-renders every chart; called on load and after window resize
 function renderAllCharts(data) {
   if (!data || data.length === 0) return;
   renderHookChart(data);
   renderVinylRebirth(data);
-  renderCdPeak(data);
+  renderCDPeak(data);
   renderDownloadMountain(data);
   renderOwnershipAccess(data);
   renderStackedArea(data);
