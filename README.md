@@ -10,7 +10,7 @@ The website follows a Martini Glass storytelling structure. The first part guide
 
 ```text
 Music-Industry/
-├── main.html               # Main webpage
+├── index.html              # Main webpage
 ├── style.css               # Website styling
 ├── script.js               # Visualization and interaction logic
 ├── music_data.csv          # Music industry revenue dataset
@@ -54,10 +54,4 @@ in a web browser.
 
 ### Option 2: Using Visual Studio Code
 
-Install the Live Server extension and open `main.html` using Live Server.
-
-## Reproducibility
-
-All source code, data files, and assets required to reproduce the visualization are included in this repository. The website can be reproduced by cloning the repository and opening the project through a local web server or browser.
-
-The visualizations are generated directly from the included `musicdata.csv` dataset using D3.js. No external APIs, databases, or preprocessing scripts are required. Following the installation and execution instructions above will reproduce the complete storytelling website and all interactive visualizations.
+Install the Live Server extension and open `index.html` using Live Server.
