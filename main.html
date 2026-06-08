@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Evolution of Music Formats</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script defer src="./script.js"></script>
+  </head>
+  <body class="scroll-locked">
+    <header class="hero">
+      <div class="hero__inner">
+        <p class="eyebrow">Narrative Visualization</p>
+        <h1>The Sound of Change: How Music Formats Reshaped the Industry</h1>
+        <p class="intro">
+          From vinyl records to streaming platforms, the music industry has undergone major
+          technological transformations over the past 50 years. This interactive narrative
+          visualization uses the RIAA inflation-adjusted revenue dataset to explore the true economic
+          impact of how we consume music.
+        </p>
+        <a href="#section-hook" id="start-btn" class="cta">Start the story</a>
+      </div>
+    </header>
+
+    <main>
+      <section id="section-hook" class="story-section">
+        <div class="story-copy">
+          <h2>The Illusion of Growth</h2>
+          <p>
+            At first glance, the music industry appears richer today than ever before.
+            However, adjusting for inflation paints a very different picture. In reality, 
+            the industry reached its economic peak in 1999 before losing more than half 
+            of its total value over the next decade. To understand this collapse and the
+            subsequent recovery, we need to examine the history of music formats which 
+            drove the music industry.
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>Total Revenue: Raw vs. CPI-Adjusted</h3>
+          <div id="hook-chart" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-intro" class="story-section" style="min-height: 40vh; grid-template-columns: 1fr;">
+        <div class="story-copy" style="max-width: 800px; margin: 0 auto; text-align: center;">
+          <h2>Why Music Formats Matter</h2>
+          <p style="font-size: 1.15rem; color: var(--muted);">
+            The history of the music industry is a story of technological change. 
+            Over the past five decades, music has moved from physical ownership to 
+            digital access, with each new format reshaping how listeners discover, 
+            purchase, and experience music. By examining revenue trends across different 
+            formats, we can understand how technological innovation transformed the entire 
+            music industry.
+          </p>
+        </div>
+      </section>
+
+      <section id="section-1" class="story-section">
+        <div class="story-copy">
+          <h2>Vinyl & Tape Era (1970s-Present)</h2>
+          <p>
+            During the 1970s and early 1980s, vinyl records and cassette tapes dominated the music industry.
+            Music was purchased as a physical product, and industry revenue depended entirely on album sales.
+            As the portability of cassette tapes became increasingly appealing to consumers, vinyl sales declined. 
+            Both formats eventually became irrelevent as digital technologies emerged. However,
+            in 2010, vinyl had a resurgence in popularity and was able to rise from the dead to become a
+            billion dollar format once again.
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>The Physical Era</h3>
+          <div id="vinyl-rebirth" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-2" class="story-section">
+        <div class="story-copy">
+          <h2>The Rise of CDs (1990s)</h2>
+          <p>
+            The introduction of compact discs transformed the music industry 
+            during the 1990s by offering improved sound quality and convenience. 
+            As the industry shifted from casettes to CDs, consumers were 
+            forced to repurchase their existing music collections at premium prices. 
+          </p>
+          <p>
+            This massive wave of replacement drove the industry to 
+            an inflation-adjusted financial peak in 1999. However, in the same year, 
+            a peer-to-peer file-sharing service called Napster was launched. 
+            It allowed users to download digital mp3 files for free, popping the CD 
+            bubble and sending industry revenues into a sharp decline.
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>CD Revenue vs. Total Industry Revenue</h3>
+          <div id="cd-peak" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-3" class="story-section">
+        <div class="story-copy">
+          <h2>Digital Disruption (2000s)</h2>
+          <p>
+           Internet-based music distribution disrupted the traditional industry in the 2000s.
+           This is particularly highlighted by the the launch of the iTunes store in 2003.
+           With this launch, digital downloads skyrocketed, creating a strong new source of revenue 
+           for the industry. However, this peak was short-lived, and collapsed once modern 
+           streaming technologies emerged to replace individual purchases.
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>The Rise and Fall of Downloads</h3>
+          <div id="download-mountain" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-4" class="story-section">
+        <div class="story-copy">
+          <h2>Streaming Dominance (2015-Present)</h2>
+          <p>
+            Streaming services replaced ownership with on-demand access. Following the launch of
+            platforms like Spotify in 2008, consumer behavior began to fundamentally change as the 
+            convenience of listening to an endless amount of music mattered more than actually
+            owning the songs listened to.
+          </p>
+          <p>
+            By 2016, streaming generated more revenue than the other formats combined. 
+            This marked a permanent shift where the industry moved away from a model of owning media 
+            (physical formats and digital downloads) to renting access to massive digital libraries 
+            (streaming).
+
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>Ownership vs. Access</h3>
+          <div id="ownership-access" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-finale" class="story-section">
+        <div class="story-copy">
+          <h2>The Complete Picture</h2>
+          <p>
+            This visualization presents a comprehensive 50-year overview of the music industry's 
+            evolution. It illustrates how formats have emerged, captured market share, declined, and 
+            ultimately replaced one another over time.
+          </p>
+        </div>
+        <div class="story-viz card">
+          <h3>Transformation of the Music Industry</h3>
+          <div id="stacked-area" class="viz"></div>
+        </div>
+      </section>
+
+      <section id="section-5" class="story-section dashboard">
+        <div class="story-copy">
+          <h2>Interactive Exploration Dashboard</h2>
+          <p>
+            Explore the data yourself. Select one or more formats below to create custom comparisons. 
+            Click and drag across the chart to view the revenue and market share of different formats across the years.
+          </p>
+          <div id="controls" class="controls"></div>
+        </div>
+        <div class="story-viz card">
+          <h3>Comparison Across Formats</h3>
+          <div id="interactive-dashboard" class="viz"></div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

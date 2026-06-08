@@ -1,1120 +1,608 @@
 const formatOrder = ["Vinyl", "Tape", "CD / Disc", "Digital Download", "Streaming"];
+
 const labels = {
   Vinyl: "Vinyl",
   Tape: "Tape",
   "CD / Disc": "CD / Disc",
   "Digital Download": "Digital Download",
   Streaming: "Streaming",
+  TotalCPI: "CPI Adjusted",
+  TotalRaw: "Raw Revenue",
+  Ownership: "Ownership",
+  Access: "Access (Stream)"
 };
+
 const colors = {
   Vinyl: "#f97316",
   Tape: "#22c55e",
   "CD / Disc": "#facc15",
   "Digital Download": "#60a5fa",
   Streaming: "#c084fc",
-};
-const dashboardStoryRecaps = {
-  Vinyl:
-    "Vinyl defined the early music industry and represented the era of physical ownership before portable formats emerged.",
-  Tape:
-    "Cassette tapes surpassed vinyl by offering portability and convenience, becoming the dominant format of the late 1980s.",
-  "CD / Disc":
-    "CDs generated the highest revenue in music industry history and marked the peak of physical media sales.",
-  "Digital Download":
-    "Digital downloads introduced online music purchases but failed to fully replace declining CD revenue.",
-  Streaming:
-    "Streaming transformed music into an on-demand service and became the dominant source of industry revenue.",
-};
-const donutFormatInsights = {
-  Streaming: [
-    "The dominant format in {year}.",
-    "More than all other formats combined.",
-  ],
-  "CD / Disc": [
-    "Once the industry's largest format,",
-    "but largely replaced by streaming.",
-  ],
-  Vinyl: ["Experienced a niche revival in the streaming era."],
-  Tape: ["No longer a meaningful revenue source."],
-  "Digital Download": ["Peaked in the late 2000s before streaming took over."],
+  TotalCPI: "#f8fafc",
+  TotalRaw: "#64748b",
+  Ownership: "#f43f5e",
+  Access: "#c084fc",
+  Other: "#334155" 
 };
 
-function formatRevenueShort(valueInMillions) {
-  return `$${d3.format(".1f")(valueInMillions / 1000)}B`;
-}
-
-function getDashboardStoryRecap(format) {
-  return dashboardStoryRecaps[format] || "";
-}
-const CHART_CONTAINER_IDS = [
-  "stacked-area",
-  "vinyl-tape-line",
-  "cd-revolution",
-  "disruption-timeline",
-  "streaming-dominance",
-  "interactive-dashboard",
-];
 let cachedData = null;
 let resizeTimer = null;
 
 function classifyFormat(rawFormat) {
-  const f = rawFormat.toLowerCase();
+  const f = String(rawFormat).toLowerCase();
   if (f.includes("lp/ep") || f.includes("vinyl")) return "Vinyl";
   if (f.includes("cassette") || f.includes("8 - track") || f.includes("other tapes") || f.includes("tape")) return "Tape";
-  if (f.includes("cd") || f.includes("disc")) return "CD / Disc";
-  if (f.includes("download")) return "Digital Download";
-  if (f.includes("streaming") || f.includes("subscription") || f.includes("soundexchange")) return "Streaming";
+  if (f.includes("cd") || f.includes("disc") || f.includes("sacd")) return "CD / Disc";
+  if (f.includes("download") || f.includes("kiosk") || f.includes("ringtones") || f.includes("other digital")) return "Digital Download";
+  if (f.includes("streaming") || f.includes("subscription") || f.includes("soundexchange") || f.includes("on-demand")) return "Streaming";
   return null;
 }
 
 function toNumeric(v) {
-  const n = Number.parseFloat(v);
-  return Number.isFinite(n) ? n : 0;
+  if (!v) return 0;
+  return (Number.parseFloat(String(v).replace(/[^0-9.-]+/g, "")) / 1e9) || 0;
 }
 
 async function loadStoryData() {
-  const raw = await d3.csv("./musicdata.csv");
-  const valueRows = raw.filter((d) => d.metric === "Value");
-  const byYear = d3.group(valueRows, (d) => Number.parseInt(d.year, 10));
+  const response = await fetch("./music_data.csv");
+  const text = await response.text();
+  const raw = text.includes("\t") ? d3.tsvParse(text) : d3.csvParse(text);
+
+  const headers = Object.keys(raw[0]);
+  const yearCol = headers.find(k => k.toLowerCase().includes("year"));
+  const formatCol = headers.find(k => k.toLowerCase().includes("format") && !k.toLowerCase().includes("format2"));
+  const cpiCol = headers.find(k => k.toLowerCase().includes("cpi"));
+  const rawCol = headers.find(k => k.toLowerCase() === "revenue" || k.toLowerCase() === "value");
+
+  const byYear = d3.group(raw, (d) => Number.parseInt(d[yearCol], 10));
   const wideData = [];
 
   byYear.forEach((rows, year) => {
-    if (!Number.isFinite(year)) return;
-    const point = { Year: year };
-    formatOrder.forEach((k) => {
-      point[k] = 0;
-    });
+    if (!year) return;
+    const point = { Year: year, TotalCPI: 0, TotalRaw: 0, Ownership: 0, Access: 0 };
+    formatOrder.forEach(k => point[k] = 0);
 
     rows.forEach((r) => {
-      const category = classifyFormat(r.format);
-      if (!category) return;
-      point[category] += toNumeric(r.value_actual);
+      if (r[formatCol] && String(r[formatCol]).toLowerCase() === "total") return;
+      
+      const category = classifyFormat(r[formatCol]);
+      if (category) {
+        const cpiVal = toNumeric(r[cpiCol]);
+        const rawVal = toNumeric(r[rawCol]);
+        
+        point[category] += cpiVal;
+        point.TotalCPI += cpiVal;
+        point.TotalRaw += rawVal;
+        
+        if (category === "Streaming") point.Access += cpiVal;
+        else point.Ownership += cpiVal;
+      }
     });
-
-    point.total = formatOrder.reduce((acc, k) => acc + point[k], 0);
     wideData.push(point);
   });
 
-  wideData.sort((a, b) => a.Year - b.Year);
-  return wideData;
+  return wideData.sort((a, b) => a.Year - b.Year);
 }
 
 function drawAxes(svg, xScale, yScale, width, height, margin) {
-  svg
-    .append("g")
-    .attr("class", "grid")
-    .attr("transform", `translate(0,${height - margin.bottom})`)
+  svg.append("g").attr("class", "grid").attr("transform", `translate(0,${height - margin.bottom})`)
     .call(d3.axisBottom(xScale).ticks(6).tickSize(-(height - margin.top - margin.bottom)).tickFormat(() => ""));
-
-  svg
-    .append("g")
-    .attr("class", "grid")
-    .attr("transform", `translate(${margin.left},0)`)
+  svg.append("g").attr("class", "grid").attr("transform", `translate(${margin.left},0)`)
     .call(d3.axisLeft(yScale).ticks(5).tickSize(-(width - margin.left - margin.right)).tickFormat(() => ""));
-
-  svg
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(0,${height - margin.bottom})`)
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`)
     .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.format("d")));
-
-  svg
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(${margin.left},0)`)
-    .call(d3.axisLeft(yScale).ticks(5));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`)
+    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => "$" + d));
 }
 
-function createSvg(containerId, minHeight = 320) {
+function createSvg(containerId, minHeight = 340) {
   const container = document.getElementById(containerId);
+  container.innerHTML = "";
   const width = Math.max(container.clientWidth, 320);
-  const height = Math.max(minHeight, 300);
+  const height = Math.max(minHeight, 340);
   const svg = d3.select(container).append("svg").attr("width", width).attr("height", height);
-  return { svg, width, height };
+  return { svg, width, height, container: d3.select(container) };
 }
 
-// 1. Stacked area chart
-// Transformation of the Music Industry by Format
-// Animated timeline reveal, annotations, legend, replay
-function renderStackedArea(wideData) {
-  const { svg, width, height } = createSvg("stacked-area");
-  const vizContainer = d3.select("#stacked-area");
-  const compact = width < 760;
-  const legendWidth = compact ? 140 : 150;
-  const margin = { top: 30, right: legendWidth + 24, bottom: 50, left: 70 };
-  const series = d3.stack().keys(formatOrder)(wideData);
-  const x = d3
-    .scaleLinear()
-    .domain(d3.extent(wideData, (d) => d.Year))
-    .range([margin.left, width - margin.right]);
-  const y = d3
-    .scaleLinear()
-    .domain([0, d3.max(series, (s) => d3.max(s, (d) => d[1]))])
-    .nice()
-    .range([height - margin.bottom, margin.top]);
+function setupAnimation(svg, container, paths, width, height, margin, duration = 4000) {
+  const clipId = `clip-${Math.random().toString(36).substr(2, 9)}`;
+  const clipRect = svg.append("clipPath").attr("id", clipId).append("rect")
+    .attr("x", margin.left).attr("y", margin.top).attr("width", 0).attr("height", height - margin.top - margin.bottom);
+  
+  paths.attr("clip-path", `url(#${clipId})`);
+  const delayedElements = svg.selectAll(".delayed-label").attr("opacity", 0);
+  const btn = container.append("button").attr("class", "play-overlay").text("▶ Play Animation");
 
-  const area = d3
-    .area()
-    .x((d) => x(d.data.Year))
-    .y0((d) => y(d[0]))
-    .y1((d) => y(d[1]))
-    .curve(d3.curveLinear);
+  btn.on("click", () => {
+    btn.style("display", "none");
+    clipRect.transition().duration(duration).ease(d3.easeLinear).attr("width", width - margin.left - margin.right)
+      .on("end", () => {
+         delayedElements.transition().duration(800).attr("opacity", 1);
+         svg.selectAll(".delayed-interactivity").style("pointer-events", "all");
+      });
+  });
+}
 
-  const paths = svg
-    .append("g")
-    .selectAll("path")
-    .data(series)
-    .join("path")
-    .attr("fill", (d) => colors[d.key])
-    .attr("opacity", 0.85)
-    .attr("d", area);
+function addHoverTooltip(svg, container, width, height, margin, data, formatKeys, isDelayed = false) {
+  container.style("position", "relative");
+  const tooltip = container.append("div").attr("class", "viz-tooltip").style("opacity", 0);
+  const crosshair = svg.append("line").attr("y1", margin.top).attr("y2", height - margin.bottom)
+    .attr("stroke", "#ffffff").attr("stroke-width", 1).attr("stroke-dasharray", "4,4").style("opacity", 0).style("pointer-events", "none");
 
-  const clip = svg.append("clipPath").attr("id", "timeline-reveal");
-  const clipRect = clip
-    .append("rect")
-    .attr("x", margin.left)
-    .attr("y", margin.top)
-    .attr("width", 0)
-    .attr("height", height - margin.top - margin.bottom);
-  paths.attr("clip-path", "url(#timeline-reveal)");
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, width - margin.right]);
+  const bisectYear = d3.bisector(d => d.Year).left;
+  const overlay = svg.append("rect").attr("width", width).attr("height", height).style("fill", "none");
 
-  const annotations = [
-    {
-      year: 1977,
-      text: "Vinyl & Tape dominate",
-      format: "Vinyl",
-      dx: 22,
-      dy: -42,
-      textColor: colors.Vinyl,
-    },
-    {
-      year: 1990,
-      text: "CD / Disc dominates",
-      format: "CD / Disc",
-      dx: 12,
-      dy: -28,
-      textColor: colors["CD / Disc"],
-    },
-    {
-      year: 2000,
-      text: "CD revenue drops",
-      format: "CD / Disc",
-      dx: 24,
-      dy: 26,
-      textColor: colors["CD / Disc"],
-    },
-    {
-      year: 2015,
-      text: "Streaming rises rapidly",
-      format: "Streaming",
-      dx: -78,
-      dy: -42,
-      textColor: colors.Streaming,
-    },
-  ];
-  const compactAdjustments = {
-    "Vinyl & Tape dominate": { dx: 10, dy: -28 },
-    "CD / Disc dominates": { dx: 8, dy: -18 },
-    "CD revenue drops": { dx: 15, dy: 18 },
-    "Streaming rises rapidly": { dx: -46, dy: -30 },
-  };
+  if (isDelayed) overlay.attr("class", "delayed-interactivity").style("pointer-events", "none");
+  else overlay.style("pointer-events", "all");
 
-  svg
-    .append("defs")
-    .append("marker")
-    .attr("id", "arrow")
-    .attr("viewBox", "0 -5 10 10")
-    .attr("refX", 10)
-    .attr("refY", 0)
-    .attr("markerWidth", 6)
-    .attr("markerHeight", 6)
-    .attr("orient", "auto")
-    .append("path")
-    .attr("d", "M0,-5L10,0L0,5")
-    .attr("fill", "#dbe6ff");
+  overlay.on("mousemove", (event) => {
+    const mouseX = d3.pointer(event)[0];
+    const x0 = x.invert(mouseX);
+    
+    if (x0 < data[0].Year || x0 > data[data.length - 1].Year) {
+      tooltip.style("opacity", 0);
+      crosshair.style("opacity", 0);
+      return;
+    }
 
-  function getAnnotationPoint(format, year) {
-    const targetSeries = series.find((s) => s.key === format);
-    if (!targetSeries) return null;
-    const point = targetSeries.find((d) => d.data.Year === year);
-    if (!point) return null;
-    return { x: x(year), y: y(point[1]) };
-  }
+    const i = bisectYear(data, x0, 1);
+    const d0 = data[i - 1];
+    const d1 = data[i] || d0;
+    const currentData = x0 - d0.Year > d1.Year - x0 ? d1 : d0;
+    const currentX = x(currentData.Year);
 
-  const annotationGroups = svg
-    .append("g")
-    .attr("class", "annotations")
-    .selectAll("g")
-    .data(annotations)
-    .join("g")
-    .attr("opacity", 0);
+    crosshair.attr("x1", currentX).attr("x2", currentX).style("opacity", 0.6);
 
-  annotationGroups.each(function eachAnnotation(a) {
-    const point = getAnnotationPoint(a.format, a.year);
-    if (!point) return;
+    const sortedKeys = [...formatKeys].sort((a, b) => currentData[b] - currentData[a]);
+    let html = `<strong style="color: #fff; font-size: 1.1rem;">Year: ${currentData.Year}</strong><br/>
+                <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">`;
+    
+    sortedKeys.forEach(key => {
+        const val = currentData[key];
+        if (val > 0) {
+            html += `<div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
+                       <span style="display:inline-block; width:10px; height:10px; background:${colors[key] || colors.Other}; margin-right:8px; border-radius:50%;"></span>
+                       <span>${labels[key] || key}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
+                     </div>`;
+        }
+    });
+    html += `</div>`;
 
-    const g = d3.select(this);
-    const adjust = compact ? compactAdjustments[a.text] : null;
-    const labelX = point.x + (adjust ? adjust.dx : a.dx);
-    const labelY = point.y + (adjust ? adjust.dy : a.dy);
+    let tooltipX = mouseX + 20;
+    if (tooltipX + 160 > width) tooltipX = mouseX - 180; 
 
-    g.append("line")
-      .attr("x1", labelX)
-      .attr("y1", labelY + 8)
-      .attr("x2", point.x)
-      .attr("y2", point.y)
-      .attr("stroke", "#dbe6ff")
-      .attr("stroke-width", 1.5)
-      .attr("marker-end", "url(#arrow)");
-
-    g.append("text")
-      .attr("x", labelX)
-      .attr("y", labelY)
-      .attr("font-size", compact ? 11 : 13)
-      .attr("font-weight", "bold")
-      .attr("fill", a.textColor)
-      .text(a.text);
+    tooltip.html(html).style("left", tooltipX + "px").style("top", "20px").style("opacity", 1);
   });
 
-  const marker = svg
-    .append("line")
-    .attr("y1", margin.top)
-    .attr("y2", height - margin.bottom)
-    .attr("stroke", "#f8fbff")
-    .attr("stroke-width", 1.5)
-    .attr("opacity", 0.6);
+  overlay.on("mouseout", () => {
+    tooltip.style("opacity", 0);
+    crosshair.style("opacity", 0);
+  });
+}
 
-  const eraLabel = svg
-    .append("text")
-    .attr("x", margin.left + 10)
-    .attr("y", margin.top + 25)
-    .attr("font-size", 18)
-    .attr("font-weight", "bold")
-    .text("Vinyl Era")
-    .attr("fill", colors.Vinyl);
+function renderHookChart(data) {
+  const c = createSvg("hook-chart");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 20, right: 40, bottom: 40, left: 60 };
+  
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(data, d => d.TotalCPI) * 1.1]).range([height - margin.bottom, margin.top]);
+  
+  drawAxes(svg, x, y, width, height, margin);
 
-  const yearLabel = svg
-    .append("text")
-    .attr("x", width - margin.right - 12)
-    .attr("y", margin.top + 34)
-    .attr("text-anchor", "end")
-    .attr("font-size", compact ? 22 : 44)
-    .attr("font-weight", "800")
-    .attr("fill", "#eef2ff")
-    .attr("opacity", 0.82)
-    .text(d3.min(wideData, (d) => d.Year));
+  const lineRaw = d3.line().x(d => x(d.Year)).y(d => y(d.TotalRaw)).curve(d3.curveMonotoneX);
+  const lineCPI = d3.line().x(d => x(d.Year)).y(d => y(d.TotalCPI)).curve(d3.curveMonotoneX);
 
-  const replayButton = vizContainer
-    .append("button")
-    .attr("class", "replay-btn")
-    .style("display", "none")
-    .text("Replay animation");
+  const g = svg.append("g");
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors.TotalRaw).attr("stroke-width", 3).attr("stroke-dasharray", "6,6").attr("d", lineRaw);
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors.TotalCPI).attr("stroke-width", 4).attr("d", lineCPI);
 
-  function runStackedAreaAnimation() {
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
+
+  const legend = svg.append("g").attr("transform", `translate(${margin.left + 20}, ${margin.top})`);
+  const legendData = [{ label: labels.TotalCPI, color: colors.TotalCPI, dash: "none" }, { label: labels.TotalRaw, color: colors.TotalRaw, dash: "6,6" }];
+
+  legend.selectAll("g").data(legendData).join("g").attr("transform", (d, i) => `translate(0, ${i * 24})`).call(grp => {
+      grp.append("line").attr("x1", 0).attr("x2", 24).attr("y1", 4).attr("y2", 4).attr("stroke", d => d.color).attr("stroke-width", 3).attr("stroke-dasharray", d => d.dash);
+      grp.append("text").attr("x", 34).attr("y", 9).attr("font-size", "13px").attr("font-weight", "bold").attr("fill", d => d.color).text(d => d.label);
+  });
+
+  setupAnimation(svg, container, g, width, height, margin);
+  addHoverTooltip(svg, container, width, height, margin, data, ["TotalCPI", "TotalRaw"], true);
+}
+
+function renderVinylRebirth(data) {
+  const c = createSvg("vinyl-rebirth");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 20, right: 40, bottom: 40, left: 60 };
+  
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(data, d => Math.max(d.Vinyl, d.Tape)) * 1.1]).range([height - margin.bottom, margin.top]);
+  
+  drawAxes(svg, x, y, width, height, margin);
+
+  const lineVinyl = d3.line().x(d => x(d.Year)).y(d => y(d.Vinyl)).curve(d3.curveMonotoneX);
+  const lineTape = d3.line().x(d => x(d.Year)).y(d => y(d.Tape)).curve(d3.curveMonotoneX);
+
+  const g = svg.append("g");
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors.Vinyl).attr("stroke-width", 4).attr("d", lineVinyl);
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors.Tape).attr("stroke-width", 4).attr("d", lineTape);
+
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
+
+  const legend = svg.append("g").attr("transform", `translate(${margin.left + 20}, ${margin.top})`);
+  const legendData = [{ label: labels.Vinyl, color: colors.Vinyl }, { label: labels.Tape, color: colors.Tape }];
+
+  legend.selectAll("g").data(legendData).join("g").attr("transform", (d, i) => `translate(0, ${i * 24})`).call(grp => {
+      grp.append("line").attr("x1", 0).attr("x2", 24).attr("y1", 4).attr("y2", 4).attr("stroke", d => d.color).attr("stroke-width", 4);
+      grp.append("text").attr("x", 34).attr("y", 9).attr("font-size", "13px").attr("font-weight", "bold").attr("fill", d => d.color).text(d => d.label);
+  });
+
+  addHoverTooltip(svg, container, width, height, margin, data, ["Vinyl", "Tape"]);
+}
+
+function renderCdPeak(data) {
+  const c = createSvg("cd-peak");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 20, right: 120, bottom: 40, left: 60 };
+  
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(data, d => d.TotalCPI) * 1.1]).range([height - margin.bottom, margin.top]);
+  
+  drawAxes(svg, x, y, width, height, margin);
+
+  const areaTotal = d3.area().x(d => x(d.Year)).y0(y(0)).y1(d => y(d.TotalCPI)).curve(d3.curveMonotoneX);
+  const areaCD = d3.area().x(d => x(d.Year)).y0(y(0)).y1(d => y(d["CD / Disc"])).curve(d3.curveMonotoneX);
+
+  const g = svg.append("g");
+  g.append("path").datum(data).attr("fill", "rgba(248, 250, 252, 0.1)").attr("d", areaTotal);
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors.TotalCPI).attr("stroke-width", 2).attr("stroke-dasharray", "4,4").attr("d", d3.line().x(d => x(d.Year)).y(d => y(d.TotalCPI)).curve(d3.curveMonotoneX));
+  g.append("path").datum(data).attr("fill", "rgba(250, 204, 21, 0.25)").attr("d", areaCD);
+  g.append("path").datum(data).attr("fill", "none").attr("stroke", colors["CD / Disc"]).attr("stroke-width", 3).attr("d", d3.line().x(d => x(d.Year)).y(d => y(d["CD / Disc"])).curve(d3.curveMonotoneX));
+
+  svg.append("text").attr("x", width - margin.right + 10).attr("y", y(data[data.length-1].TotalCPI)).attr("fill", colors.TotalCPI).attr("font-size", "12px").text("Total Industry");
+  svg.append("text").attr("x", x(1999)).attr("y", y(data.find(d => d.Year === 1999)["CD / Disc"]) - 15).attr("text-anchor", "middle").attr("fill", colors["CD / Disc"]).attr("font-weight", "bold").attr("font-size", "14px").text("CD Revenue Peak");
+  
+  svg.append("line").attr("x1", x(1999)).attr("x2", x(1999)).attr("y1", y(0)).attr("y2", y(0) - 30).attr("stroke", "#fff").attr("stroke-dasharray", "2,2").attr("opacity", 0.4);
+  svg.append("circle").attr("cx", x(1999)).attr("cy", y(0)).attr("r", 4).attr("fill", "#fff");
+  svg.append("text").attr("x", x(1999)).attr("y", y(0) - 38).attr("text-anchor", "middle").attr("fill", "#e2e8f0").attr("font-size", "11px").text("Napster (1999)");
+
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
+
+  addHoverTooltip(svg, container, width, height, margin, data, ["TotalCPI", "CD / Disc"]);
+}
+
+function renderDownloadMountain(data) {
+  const c = createSvg("download-mountain");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 20, right: 80, bottom: 40, left: 60 };
+  
+  const filtered = data.filter(d => d.Year >= 1998 && d.Year <= 2025);
+  const x = d3.scaleLinear().domain(d3.extent(filtered, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(filtered, d => d["Digital Download"]) * 1.1]).range([height - margin.bottom, margin.top]);
+  
+  drawAxes(svg, x, y, width, height, margin);
+
+  const area = d3.area().x(d => x(d.Year)).y0(y(0)).y1(d => y(d["Digital Download"])).curve(d3.curveMonotoneX);
+  const line = d3.line().x(d => x(d.Year)).y(d => y(d["Digital Download"])).curve(d3.curveMonotoneX);
+
+  const g = svg.append("g");
+  g.append("path").datum(filtered).attr("fill", "rgba(96, 165, 250, 0.25)").attr("d", area);
+  g.append("path").datum(filtered).attr("fill", "none").attr("stroke", colors["Digital Download"]).attr("stroke-width", 4).attr("d", line);
+
+  svg.append("text").attr("x", x(2012)).attr("y", y(filtered.find(d => d.Year === 2012)["Digital Download"]) - 15).attr("text-anchor", "middle").attr("fill", colors["Digital Download"]).attr("font-weight", "bold").attr("font-size", "14px").text("Downloads Peak");
+  
+  svg.append("line").attr("x1", x(2003)).attr("x2", x(2003)).attr("y1", y(0)).attr("y2", y(0) - 30).attr("stroke", "#fff").attr("stroke-dasharray", "2,2").attr("opacity", 0.4);
+  svg.append("circle").attr("cx", x(2003)).attr("cy", y(0)).attr("r", 4).attr("fill", "#fff");
+  svg.append("text").attr("x", x(2003)).attr("y", y(0) - 38).attr("text-anchor", "middle").attr("fill", "#e2e8f0").attr("font-size", "11px").text("iTunes Store (2003)");
+  
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
+
+  addHoverTooltip(svg, container, width, height, margin, filtered, ["Digital Download"]);
+}
+
+function renderOwnershipAccess(data) {
+  const c = createSvg("ownership-access");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 20, right: 40, bottom: 40, left: 60 };
+  
+  const filtered = data.filter(d => d.Year >= 2000);
+  const x = d3.scaleLinear().domain(d3.extent(filtered, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(filtered, d => Math.max(d.Ownership, d.Access)) * 1.1]).range([height - margin.bottom, margin.top]);
+  
+  drawAxes(svg, x, y, width, height, margin);
+
+  const lineOwn = d3.line().x(d => x(d.Year)).y(d => y(d.Ownership)).curve(d3.curveMonotoneX);
+  const lineAccess = d3.line().x(d => x(d.Year)).y(d => y(d.Access)).curve(d3.curveMonotoneX);
+
+  const g = svg.append("g");
+  g.append("path").datum(filtered).attr("fill", "none").attr("stroke", colors.Ownership).attr("stroke-width", 4).attr("d", lineOwn);
+  g.append("path").datum(filtered).attr("fill", "none").attr("stroke", colors.Access).attr("stroke-width", 4).attr("d", lineAccess);
+
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
+
+  const legend = svg.append("g").attr("transform", `translate(${margin.left + 20}, ${margin.top})`);
+  const legendData = [{ label: labels.Ownership, color: colors.Ownership }, { label: labels.Access, color: colors.Access }];
+
+  legend.selectAll("g").data(legendData).join("g").attr("transform", (d, i) => `translate(0, ${i * 24})`).call(grp => {
+      grp.append("line").attr("x1", 0).attr("x2", 24).attr("y1", 4).attr("y2", 4).attr("stroke", d => d.color).attr("stroke-width", 4);
+      grp.append("text").attr("x", 34).attr("y", 9).attr("font-size", "13px").attr("font-weight", "bold").attr("fill", d => d.color).text(d => d.label);
+  });
+
+  const timelineEvents = [
+    { year: 2008, text: "Spotify Launch (2008)", offset: 30 },
+    { year: 2015, text: "Mobile Streaming Scale (2015)", offset: 60 },
+    { year: 2020, text: "Subscription Mainstream (2020)", offset: 30 }
+  ];
+
+  timelineEvents.forEach(e => {
+    svg.append("line").attr("x1", x(e.year)).attr("x2", x(e.year)).attr("y1", y(0)).attr("y2", y(0) - e.offset).attr("stroke", "#fff").attr("stroke-dasharray", "2,2").attr("opacity", 0.4);
+    svg.append("circle").attr("cx", x(e.year)).attr("cy", y(0)).attr("r", 4).attr("fill", "#fff");
+    svg.append("text").attr("x", x(e.year)).attr("y", y(0) - e.offset - 8).attr("text-anchor", "middle").attr("fill", "#e2e8f0").attr("font-size", "11px").text(e.text);
+  });
+
+  addHoverTooltip(svg, container, width, height, margin, filtered, ["Ownership", "Access"]);
+}
+
+function renderStackedArea(data) {
+  const c = createSvg("stacked-area");
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  const margin = { top: 30, right: 120, bottom: 40, left: 60 };
+  
+  const series = d3.stack().keys(formatOrder)(data);
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, width - margin.right]);
+  const y = d3.scaleLinear().domain([0, d3.max(series, s => d3.max(s, d => d[1]))]).range([height - margin.bottom, margin.top]);
+
+  drawAxes(svg, x, y, width, height, margin);
+
+  const area = d3.area().x(d => x(d.data.Year)).y0(d => y(d[0])).y1(d => y(d[1])).curve(d3.curveMonotoneX);
+
+  const paths = svg.append("g").selectAll("path").data(series).join("path").attr("fill", d => colors[d.key]).attr("opacity", 0.85).attr("d", area);
+
+  const clipId = `clip-stacked-${Math.random().toString(36).substr(2, 9)}`;
+  const clipRect = svg.append("clipPath").attr("id", clipId).append("rect")
+    .attr("x", margin.left).attr("y", margin.top).attr("width", 0).attr("height", height - margin.top - margin.bottom);
+  paths.attr("clip-path", `url(#${clipId})`);
+
+  const marker = svg.append("line").attr("y1", margin.top).attr("y2", height - margin.bottom).attr("stroke", "#f8fbff").attr("stroke-width", 1.5).attr("opacity", 0);
+  const eraLabel = svg.append("text").attr("x", margin.left + 10).attr("y", margin.top + 25).attr("font-size", 18).attr("font-weight", "bold").text("");
+  const yearLabel = svg.append("text").attr("x", width - margin.right - 12).attr("y", margin.top + 34).attr("text-anchor", "end").attr("font-size", 24).attr("font-weight", "800").attr("fill", "#eef2ff").attr("opacity", 0.82).text("");
+
+  const replayButton = container.append("button").attr("class", "replay-btn").text("▶ Play 50-Year History");
+
+  function runStackedAnimation() {
     clipRect.interrupt();
-    annotationGroups.interrupt();
-    marker.interrupt();
+    replayButton.style("display", "none");
+    marker.attr("opacity", 0.6);
 
     clipRect.attr("width", 0);
-    annotationGroups.attr("opacity", 0);
-    const startYear = d3.min(wideData, (d) => d.Year);
-    marker.attr("x1", x(startYear)).attr("x2", x(startYear));
-    eraLabel.text("Vinyl Era").attr("fill", colors.Vinyl);
-    yearLabel.text(startYear);
-    replayButton.style("display", "none");
-
-    clipRect
-      .transition()
-      .duration(10000)
-      .ease(d3.easeLinear)
-      .attrTween("width", function attrTweenWidth() {
-        const start = d3.min(wideData, (d) => d.Year);
-        const end = d3.max(wideData, (d) => d.Year);
+    const startYear = d3.min(data, d => d.Year);
+    const endYear = d3.max(data, d => d.Year);
+    
+    clipRect.transition().duration(8000).ease(d3.easeLinear)
+      .attrTween("width", function() {
         const totalWidth = width - margin.left - margin.right;
-        return function update(t) {
-          const currentYear = Math.round(start + t * (end - start));
+        return function(t) {
+          const currentYear = Math.round(startYear + t * (endYear - startYear));
           const currentX = x(currentYear);
+          
           yearLabel.text(currentYear);
           marker.attr("x1", currentX).attr("x2", currentX);
-          const passed = annotations.filter((a) => currentYear >= a.year);
-          const activeYear = passed.length ? passed[passed.length - 1].year : null;
-          annotationGroups.attr("opacity", (d) => (d.year === activeYear ? 1 : 0));
 
-          if (currentYear < 1980) {
-            eraLabel.text("Vinyl Era").attr("fill", colors.Vinyl);
-          } else if (currentYear < 1990) {
-            eraLabel.text("Tape Era").attr("fill", colors.Tape);
-          } else if (currentYear < 2005) {
-            eraLabel.text("CD Dominance").attr("fill", colors["CD / Disc"]);
-          } else if (currentYear < 2015) {
-            eraLabel.text("Digital Download Era").attr("fill", colors["Digital Download"]);
-          } else {
-            eraLabel.text("Streaming Era").attr("fill", colors.Streaming);
-          }
+          if (currentYear < 1980) eraLabel.text("Vinyl Era").attr("fill", colors.Vinyl);
+          else if (currentYear < 1990) eraLabel.text("Tape Era").attr("fill", colors.Tape);
+          else if (currentYear < 2005) eraLabel.text("CD Dominance").attr("fill", colors["CD / Disc"]);
+          else if (currentYear < 2015) eraLabel.text("Digital Transition").attr("fill", colors["Digital Download"]);
+          else eraLabel.text("Streaming Era").attr("fill", colors.Streaming);
+
           return t * totalWidth;
         };
       })
       .on("end", () => {
-        annotationGroups.attr("opacity", 1);
-        yearLabel.text(d3.max(wideData, (d) => d.Year));
-        replayButton.style("display", "inline-flex");
+        replayButton.text("↻ Replay").style("display", "inline-flex");
+        marker.transition().duration(500).attr("opacity", 0);
       });
   }
 
-  replayButton.on("click", () => {
-    runStackedAreaAnimation();
-  });
+  replayButton.on("click", runStackedAnimation);
 
-  runStackedAreaAnimation();
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
 
-  svg
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(0,${height - margin.bottom})`)
-    .call(d3.axisBottom(x).tickFormat(d3.format("d")));
-
-  svg
-    .append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(${margin.left},0)`)
-    .call(d3.axisLeft(y));
-
-  svg
-    .append("text")
-    .attr("x", margin.left)
-    .attr("y", 20)
-    .attr("font-size", 18)
-    .attr("font-weight", "bold")
-    .attr("fill", "#eef2ff")
-    .text("Transformation of the Music Industry by Format");
-
-  svg
-    .append("text")
-    .attr("x", margin.left)
-    .attr("y", height - 10)
-    .attr("fill", "#afbddf")
-    .text("Year");
-
-  svg
-    .append("text")
-    .attr("x", -height / 2)
-    .attr("y", 20)
-    .attr("transform", "rotate(-90)")
-    .attr("fill", "#afbddf")
-    .text("Revenue (value)");
-
-  const legendX = width - margin.right + 20;
-  const legendY = compact ? margin.top + 44 : margin.top;
-  const legend = svg.append("g").attr("transform", `translate(${legendX}, ${legendY})`);
-  legend
-    .selectAll("g")
-    .data(formatOrder)
-    .join("g")
-    .attr("transform", (d, i) => `translate(0, ${i * (compact ? 23 : 30)})`)
-    .call((g) => {
-      g.append("rect")
-        .attr("width", compact ? 14 : 18)
-        .attr("height", compact ? 14 : 18)
-        .attr("fill", (d) => colors[d]);
-      g.append("text")
-        .attr("x", compact ? 20 : 26)
-        .attr("y", compact ? 12 : 15)
-        .attr("font-size", compact ? 13 : 16)
-        .attr("fill", "#dbe6ff")
-        .text((d) => d);
-    });
-}
-
-// 2. Line chart
-// Format revenue in the physical-first years (Vinyl vs Tape, ≤1995)
-function renderVinylTapeLine(data) {
-  const { svg, width, height } = createSvg("vinyl-tape-line");
-  const margin = { top: 15, right: 20, bottom: 35, left: 64 };
-  const filtered = data.filter((d) => d.Year <= 1995);
-  const x = d3.scaleLinear().domain(d3.extent(filtered, (d) => d.Year)).range([margin.left, width - margin.right]);
-  const y = d3.scaleLinear().domain([0, d3.max(filtered, (d) => Math.max(d.Vinyl, d.Tape)) * 1.1]).range([height - margin.bottom, margin.top]);
-  drawAxes(svg, x, y, width, height, margin);
-
-  ["Vinyl", "Tape"].forEach((key) => {
-    const line = d3
-      .line()
-      .x((d) => x(d.Year))
-      .y((d) => y(d[key]))
-      .curve(d3.curveMonotoneX);
-
-    svg
-      .append("path")
-      .datum(filtered)
-      .attr("fill", "none")
-      .attr("stroke", colors[key])
-      .attr("stroke-width", 3)
-      .attr("d", line);
-  });
-
-  svg
-    .append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 6)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Year");
-
-  svg
-    .append("text")
-    .attr("x", -height / 2)
-    .attr("y", 20)
-    .attr("transform", "rotate(-90)")
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Revenue (value)");
-}
-
-// 3. Area/line chart
-// CD revenue surge and peak
-
-function renderCdRevolution(data) {
-  const { svg, width, height } = createSvg("cd-revolution");
-  const margin = { top: 15, right: 20, bottom: 35, left: 64 };
-  const cdRevenue = data.map((d) => ({ year: d.Year, value: d["CD / Disc"] }));
-  const x = d3.scaleLinear().domain(d3.extent(cdRevenue, (d) => d.year)).range([margin.left, width - margin.right]);
-  const y = d3.scaleLinear().domain([0, d3.max(cdRevenue, (d) => d.value) * 1.1]).range([height - margin.bottom, margin.top]);
-  drawAxes(svg, x, y, width, height, margin);
-
-  const area = d3
-    .area()
-    .x((d) => x(d.year))
-    .y0(y(0))
-    .y1((d) => y(d.value))
-    .curve(d3.curveMonotoneX);
-
-  svg.append("path").datum(cdRevenue).attr("fill", "rgba(250, 204, 21, 0.25)").attr("d", area);
-  svg
-    .append("path")
-    .datum(cdRevenue)
-    .attr("fill", "none")
-    .attr("stroke", colors["CD / Disc"])
-    .attr("stroke-width", 3)
-    .attr(
-      "d",
-      d3
-        .line()
-        .x((d) => x(d.year))
-        .y((d) => y(d.value))
-        .curve(d3.curveMonotoneX)
-    );
-
-  svg
-    .append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 6)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Year");
-
-  svg
-    .append("text")
-    .attr("x", -height / 2)
-    .attr("y", 20)
-    .attr("transform", "rotate(-90)")
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Revenue (value)");
-}
-
-// Section 4: Revenue collapse chart — "Industry revenue collapse (1995–2010)"
-// Container: #disruption-timeline | Total revenue + digital download overlay from CSV
-function renderRevenueCollapse(data) {
-  const { svg, width, height } = createSvg("disruption-timeline");
-  const margin = { top: 72, right: 28, bottom: 40, left: 64 };
-  const filtered = data.filter((d) => d.Year >= 1995 && d.Year <= 2010);
-  const peakRow = filtered.reduce((best, d) => (d.total > best.total ? d : best), filtered[0]);
-
-  const x = d3
-    .scaleLinear()
-    .domain([1995, 2010])
-    .range([margin.left, width - margin.right]);
-  const y = d3
-    .scaleLinear()
-    .domain([0, d3.max(filtered, (d) => d.total) * 1.12])
-    .nice()
-    .range([height - margin.bottom, margin.top]);
-
-  const legend = svg.append("g").attr("transform", `translate(${width - margin.right}, 12)`);
-  [
-    { label: "Total industry revenue", color: "#f87171", dashed: false },
-    { label: "Digital download revenue", color: colors["Digital Download"], dashed: true },
-  ].forEach((item, i) => {
-    const g = legend.append("g").attr("transform", `translate(0, ${i * 20})`);
-    g.append("line")
-      .attr("x1", -150)
-      .attr("x2", -132)
-      .attr("y1", 0)
-      .attr("y2", 0)
-      .attr("stroke", item.color)
-      .attr("stroke-width", 2.5)
-      .attr("stroke-dasharray", item.dashed ? "6,4" : null);
-    g.append("text")
-      .attr("x", -126)
-      .attr("y", 4)
-      .attr("text-anchor", "start")
-      .attr("fill", "#ded6ff")
-      .attr("font-size", 11)
-      .text(item.label);
-  });
-
-  drawAxes(svg, x, y, width, height, margin);
-
-  const area = d3
-    .area()
-    .x((d) => x(d.Year))
-    .y0(y(0))
-    .y1((d) => y(d.total))
-    .curve(d3.curveMonotoneX);
-
-  svg
-    .append("path")
-    .datum(filtered)
-    .attr("fill", "rgba(248, 113, 113, 0.22)")
-    .attr("d", area);
-
-  svg
-    .append("path")
-    .datum(filtered)
-    .attr("fill", "none")
-    .attr("stroke", "#f87171")
-    .attr("stroke-width", 3)
-    .attr(
-      "d",
-      d3
-        .line()
-        .x((d) => x(d.Year))
-        .y((d) => y(d.total))
-        .curve(d3.curveMonotoneX)
-    );
-
-  svg
-    .append("path")
-    .datum(filtered)
-    .attr("fill", "none")
-    .attr("stroke", colors["Digital Download"])
-    .attr("stroke-width", 2.5)
-    .attr("stroke-dasharray", "6,4")
-    .attr(
-      "d",
-      d3
-        .line()
-        .x((d) => x(d.Year))
-        .y((d) => y(d["Digital Download"]))
-        .curve(d3.curveMonotoneX)
-    );
-
-  svg
-    .append("circle")
-    .attr("cx", x(peakRow.Year))
-    .attr("cy", y(peakRow.total))
-    .attr("r", 5)
-    .attr("fill", "#f87171")
-    .attr("stroke", "#fff")
-    .attr("stroke-width", 1.5);
-
-  svg
-    .append("line")
-    .attr("x1", x(1999))
-    .attr("x2", x(1999))
-    .attr("y1", margin.top)
-    .attr("y2", height - margin.bottom)
-    .attr("stroke", "#22d3ee")
-    .attr("stroke-width", 1.5)
-    .attr("stroke-dasharray", "4,4")
-    .attr("opacity", 0.85);
-
-  svg
-    .append("text")
-    .attr("x", x(1999))
-    .attr("y", margin.top - 14)
-    .attr("text-anchor", "middle")
-    .attr("font-size", 11)
-    .attr("font-weight", "bold")
-    .attr("fill", "#67e8f9")
-    .text("Napster appears");
-
-  const annotations = [
-    {
-      year: peakRow.Year,
-      value: peakRow.total,
-      text: `Revenue peaks around ${peakRow.Year}`,
-      dx: 14,
-      dy: -22,
-      color: "#fca5a5",
-      anchor: "start",
-    },
-  ];
-
-  annotations.forEach((a) => {
-    const px = x(a.year);
-    const py = y(a.value);
-    const lx = Math.max(margin.left + 4, px + a.dx);
-    const ly = Math.max(margin.top + 4, Math.min(py + a.dy, height - margin.bottom - 4));
-
-    svg
-      .append("line")
-      .attr("x1", lx)
-      .attr("y1", ly + (a.dy < 0 ? 6 : -4))
-      .attr("x2", px)
-      .attr("y2", py)
-      .attr("stroke", a.color)
-      .attr("stroke-width", 1.2)
-      .attr("opacity", 0.9);
-
-    svg
-      .append("text")
-      .attr("x", lx)
-      .attr("y", ly)
-      .attr("text-anchor", a.anchor)
-      .attr("font-size", 11)
-      .attr("font-weight", "bold")
-      .attr("fill", a.color)
-      .text(a.text);
-  });
-
-  const declineYear = 2005;
-  const declineRow = filtered.find((d) => d.Year === declineYear);
-  if (declineRow) {
-    const px = x(declineYear);
-    const py = y(declineRow.total);
-    const lx = margin.left + 10;
-    const ly = height - margin.bottom - 68;
-
-    svg
-      .append("line")
-      .attr("x1", lx + 162)
-      .attr("y1", ly - 5)
-      .attr("x2", px)
-      .attr("y2", py)
-      .attr("stroke", "#fca5a5")
-      .attr("stroke-width", 1.2)
-      .attr("opacity", 0.9);
-
-    svg
-      .append("text")
-      .attr("x", lx)
-      .attr("y", ly)
-      .attr("text-anchor", "start")
-      .attr("font-size", 11)
-      .attr("font-weight", "bold")
-      .attr("fill", "#fca5a5")
-      .text("Revenue declines dramatically");
-  }
-
-  const downloadYear = 2010;
-  const downloadRow = filtered.find((d) => d.Year === downloadYear);
-  if (downloadRow) {
-    const px = x(downloadYear);
-    const py = y(downloadRow["Digital Download"]);
-    const lx = width - margin.right - 10;
-    const ly = height - margin.bottom - 48;
-
-    svg
-      .append("line")
-      .attr("x1", lx - 168)
-      .attr("y1", ly - 5)
-      .attr("x2", px)
-      .attr("y2", py)
-      .attr("stroke", colors["Digital Download"])
-      .attr("stroke-width", 1.2)
-      .attr("opacity", 0.9);
-
-    svg
-      .append("text")
-      .attr("x", lx)
-      .attr("y", ly)
-      .attr("text-anchor", "end")
-      .attr("font-size", 11)
-      .attr("font-weight", "bold")
-      .attr("fill", colors["Digital Download"])
-      .text("Downloads too small to compensate");
-  }
-
-  svg
-    .append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 6)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Year");
-
-  svg
-    .append("text")
-    .attr("x", -height / 2)
-    .attr("y", 20)
-    .attr("transform", "rotate(-90)")
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Revenue (value)");
-}
-
-// Section 5: Market share donut — "Streaming dominates the modern industry"
-// Container: #streaming-dominance | Format revenue share (2015–present, latest year)
-function renderStreamingDominance(data) {
-  const { svg, width, height } = createSvg("streaming-dominance");
-  const vizContainer = d3.select("#streaming-dominance");
-  const modern = data.filter((d) => d.Year >= 2015);
-  const latest = modern[modern.length - 1];
-  if (!latest) return;
-
-  const total = latest.total || d3.sum(formatOrder, (k) => latest[k]);
-  const shareData = formatOrder.map((label) => ({
-    label,
-    value: latest[label],
-    pct: total > 0 ? (latest[label] / total) * 100 : 0,
-  }));
-
-  const cx = width * 0.38;
-  const cy = height / 2 + 8;
-  const outerRadius = Math.min(width * 0.34, height * 0.38);
-  const innerRadius = outerRadius * 0.58;
-
-  const pie = d3
-    .pie()
-    .value((d) => d.value)
-    .sort(null);
-  const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
-  const hoverArc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius * 1.06);
-  const labelArc = d3
-    .arc()
-    .innerRadius(outerRadius + 8)
-    .outerRadius(outerRadius + 8);
-
-  const chart = svg.append("g").attr("transform", `translate(${cx}, ${cy})`);
-  const pieData = pie(shareData);
-
-  const slices = chart
-    .selectAll("path.slice")
-    .data(pieData)
-    .join("path")
-    .attr("class", "slice")
-    .attr("fill", (d) => colors[d.data.label])
-    .attr("stroke", "#1a1033")
-    .attr("stroke-width", 1.5)
-    .attr("d", arc)
-    .style("cursor", "pointer");
-
-  const sliceLabels = chart
-    .selectAll("text.slice-label")
-    .data(pieData.filter((d) => d.data.pct >= 6))
-    .join("text")
-    .attr("class", "slice-label")
-    .attr("transform", (d) => `translate(${labelArc.centroid(d)})`)
-    .attr("text-anchor", "middle")
-    .attr("font-size", 11)
-    .attr("font-weight", "bold")
-    .attr("fill", "#f8f4ff")
-    .text((d) => `${d.data.pct.toFixed(0)}%`);
-
-  const tooltip = vizContainer
-    .append("div")
-    .attr("class", "donut-tooltip")
-    .style("opacity", 0);
-
-  function resetSliceHighlight() {
-    slices.interrupt().transition().duration(200).attr("d", arc).attr("opacity", 1);
-    sliceLabels.interrupt().transition().duration(200).attr("opacity", 1);
-    tooltip.style("opacity", 0);
-  }
-
-  function showDonutTooltip(event, d) {
-    const insightLines = (donutFormatInsights[d.data.label] || []).map((line) =>
-      line.replace("{year}", latest.Year)
-    );
-    const insightHtml = insightLines.length
-      ? `<div class="donut-tooltip__note">${insightLines.join("<br>")}</div>`
-      : "";
-
-    tooltip.html(`
-      <div class="donut-tooltip__title" style="color:${colors[d.data.label]}">${d.data.label}</div>
-      <div class="donut-tooltip__share">Market Share: ${d.data.pct.toFixed(1)}%</div>
-      ${insightHtml}
-    `);
-
-    const bounds = vizContainer.node().getBoundingClientRect();
-    const tooltipNode = tooltip.node();
-    const offsetX = event.clientX - bounds.left + 16;
-    const offsetY = event.clientY - bounds.top - 12;
-    const maxLeft = bounds.width - tooltipNode.offsetWidth - 8;
-    const maxTop = bounds.height - tooltipNode.offsetHeight - 8;
-
-    tooltip
-      .style("left", `${Math.max(8, Math.min(offsetX, maxLeft))}px`)
-      .style("top", `${Math.max(8, Math.min(offsetY, maxTop))}px`)
-      .style("opacity", 1);
-  }
-
-  slices
-    .on("mouseenter", function onSliceEnter(event, d) {
-      d3.select(this).raise().transition().duration(200).attr("d", hoverArc);
-      slices
-        .filter((slice) => slice !== d)
-        .transition()
-        .duration(200)
-        .attr("opacity", 0.35);
-      sliceLabels
-        .transition()
-        .duration(200)
-        .attr("opacity", (label) => (label.data.label === d.data.label ? 1 : 0.35));
-      showDonutTooltip(event, d);
-    })
-    .on("mousemove", (event, d) => {
-      showDonutTooltip(event, d);
-    })
-    .on("mouseleave", resetSliceHighlight);
-
-  const streamingPct = shareData.find((d) => d.label === "Streaming")?.pct ?? 0;
-  chart
-    .append("text")
-    .attr("text-anchor", "middle")
-    .attr("y", -6)
-    .attr("font-size", 22)
-    .attr("font-weight", "800")
-    .attr("fill", colors.Streaming)
-    .text(`${streamingPct.toFixed(0)}%`);
-  chart
-    .append("text")
-    .attr("text-anchor", "middle")
-    .attr("y", 16)
-    .attr("font-size", 12)
-    .attr("fill", "#ded6ff")
-    .text("Streaming");
-  chart
-    .append("text")
-    .attr("text-anchor", "middle")
-    .attr("y", 34)
-    .attr("font-size", 11)
-    .attr("fill", "#afbddf")
-    .text(`${latest.Year} market share`);
-
-  const legend = svg.append("g").attr("transform", `translate(${width * 0.68}, ${height * 0.22})`);
-  shareData.forEach((d, i) => {
-    const g = legend.append("g").attr("transform", `translate(0, ${i * 28})`);
-    g.append("rect")
-      .attr("width", 14)
-      .attr("height", 14)
-      .attr("rx", 3)
-      .attr("fill", colors[d.label]);
-    g.append("text")
-      .attr("x", 22)
-      .attr("y", 12)
-      .attr("fill", "#ded6ff")
-      .attr("font-size", 12)
-      .text(`${d.label} — ${d.pct.toFixed(1)}%`);
+  const legend = svg.append("g").attr("transform", `translate(${width - margin.right + 20}, ${margin.top})`);
+  legend.selectAll("g").data(formatOrder.slice().reverse()).join("g").attr("transform", (d, i) => `translate(0, ${i * 24})`).call(g => {
+      g.append("rect").attr("width", 14).attr("height", 14).attr("fill", d => colors[d]);
+      g.append("text").attr("x", 20).attr("y", 12).attr("font-size", 12).attr("fill", "#dbe6ff").text(d => d);
   });
 }
 
-// 6. Interactive multi-format line chart
-// Custom multi-format comparison
-// interactive-dashboar
 function renderDashboard(data) {
   const controls = d3.select("#controls");
-  const vizContainer = d3.select("#interactive-dashboard");
-  const selected = new Set(formatOrder);
+  controls.html("");
+  const selected = new Set(["Vinyl", "CD / Disc", "Streaming"]);
+  
   formatOrder.forEach((f) => {
-    controls
-      .append("button")
-      .attr("class", `chip ${selected.has(f) ? "active" : ""}`)
-      .text(labels[f])
-      .on("click", function onClick() {
-        if (selected.has(f)) {
-          selected.delete(f);
-        } else {
-          selected.add(f);
-        }
+    controls.append("button").attr("class", `chip ${selected.has(f) ? "active" : ""}`).text(labels[f]).on("click", function () {
+        if (selected.has(f)) selected.delete(f);
+        else selected.add(f);
         d3.select(this).classed("active", selected.has(f));
-        clearHighlight();
-        draw(selected);
+        draw(selected); 
       });
   });
 
-  const { svg, width, height } = createSvg("interactive-dashboard");
-  const margin = { top: 15, right: 20, bottom: 35, left: 64 };
-  const x = d3.scaleLinear().domain(d3.extent(data, (d) => d.Year)).range([margin.left, width - margin.right]);
-  const yMax = d3.max(data, (d) => d3.max(formatOrder, (k) => d[k]));
-  const y = d3.scaleLinear().domain([0, yMax * 1.1]).range([height - margin.bottom, margin.top]);
-  drawAxes(svg, x, y, width, height, margin);
+  const c = createSvg("interactive-dashboard", 400); 
+  if (!c) return;
+  const { svg, width, height, container } = c;
+  
+  const lineChartWidth = width * 0.65;
+  const pieChartWidth = width * 0.35;
+  const margin = { top: 20, right: 30, bottom: 40, left: 60 };
+  
+  container.style("position", "relative");
 
-  const yearBisect = d3.bisector((d) => d.Year).center;
-  const tooltip = vizContainer
-    .append("div")
-    .attr("class", "dashboard-tooltip")
-    .style("opacity", 0);
+  const tooltip = container.append("div").attr("class", "viz-tooltip").style("opacity", 0);
+  
+  const x = d3.scaleLinear().domain(d3.extent(data, d => d.Year)).range([margin.left, lineChartWidth - margin.right]);
+  const y = d3.scaleLinear().range([height - margin.bottom, margin.top]);
+  
+  const xAxisGroup = svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`);
+  const yAxisGroup = svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`);
+  const yGridGroup = svg.append("g").attr("class", "grid").attr("transform", `translate(${margin.left},0)`);
+  const linesGroup = svg.append("g"); 
 
-  const focus = svg.append("g").attr("class", "dashboard-focus").style("opacity", 0);
-  focus
-    .append("line")
-    .attr("class", "dashboard-hover-line")
-    .attr("y1", margin.top)
-    .attr("y2", height - margin.bottom)
-    .attr("stroke", "#f8fbff")
-    .attr("stroke-width", 1.5)
-    .attr("stroke-dasharray", "4 4")
-    .attr("pointer-events", "none");
-  focus
-    .append("circle")
-    .attr("class", "dashboard-focus-dot")
-    .attr("r", 5)
-    .attr("stroke", "#f8f4ff")
-    .attr("stroke-width", 2)
-    .attr("pointer-events", "none");
+  svg.append("text").attr("x", -height / 2).attr("y", 20).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("fill", "#afbddf").attr("font-size", 12).text("Revenue (Billions USD)");
 
-  function showDashboardTooltip(event, formatKey, yearRow) {
-    const revenue = yearRow[formatKey];
-    if (!revenue) return;
+  const crosshair = svg.append("line").attr("y1", margin.top).attr("y2", height - margin.bottom)
+    .attr("stroke", "#ffffff").attr("stroke-width", 1).attr("stroke-dasharray", "4,4").style("opacity", 0);
 
-    tooltip.html(`
-      <div class="dashboard-tooltip__title" style="color:${colors[formatKey]}">${labels[formatKey]}</div>
-      <div class="dashboard-tooltip__revenue">Revenue: ${formatRevenueShort(revenue)}</div>
-      <div class="dashboard-tooltip__year">Year: ${yearRow.Year}</div>
-      <div class="dashboard-tooltip__recap-label">Story Recap:</div>
-      <div class="dashboard-tooltip__recap">${getDashboardStoryRecap(formatKey)}</div>
-    `);
+  const overlay = svg.append("rect").attr("width", lineChartWidth).attr("height", height).style("fill", "none").style("pointer-events", "all");
 
-    const bounds = vizContainer.node().getBoundingClientRect();
-    const tooltipNode = tooltip.node();
-    const offsetX = event.clientX - bounds.left + 16;
-    const offsetY = event.clientY - bounds.top - 12;
-    const maxLeft = bounds.width - tooltipNode.offsetWidth - 8;
-    const maxTop = bounds.height - tooltipNode.offsetHeight - 8;
-
-    tooltip
-      .style("left", `${Math.max(8, Math.min(offsetX, maxLeft))}px`)
-      .style("top", `${Math.max(8, Math.min(offsetY, maxTop))}px`)
-      .style("opacity", 1);
-  }
-
-  function setHighlight(formatKey, yearRow, event) {
-    svg
-      .selectAll("path.dashboard-line")
-      .attr("opacity", (d) => (d === formatKey ? 1 : 0.35))
-      .attr("stroke-width", (d) => (d === formatKey ? 4 : 3));
-
-    const yearX = x(yearRow.Year);
-    const valueY = y(yearRow[formatKey]);
-    focus.style("opacity", 1);
-    focus.raise();
-    focus.select(".dashboard-hover-line").attr("x1", yearX).attr("x2", yearX);
-    focus
-      .select(".dashboard-focus-dot")
-      .attr("cx", yearX)
-      .attr("cy", valueY)
-      .attr("fill", colors[formatKey]);
-    showDashboardTooltip(event, formatKey, yearRow);
-  }
-
-  function clearHighlight() {
-    svg.selectAll("path.dashboard-line").attr("opacity", 1).attr("stroke-width", 3);
-    focus.style("opacity", 0);
-    tooltip.style("opacity", 0);
-  }
-
-  function linePath(key) {
-    return d3
-      .line()
-      .x((d) => x(d.Year))
-      .y((d) => y(d[key]))
-      .curve(d3.curveMonotoneX)(data);
-  }
+  const pieRadius = Math.min(pieChartWidth, height - margin.top - margin.bottom) / 2.2;
+  const pieGroup = svg.append("g").attr("transform", `translate(${lineChartWidth + pieChartWidth / 2 - margin.right + 20}, ${height / 2})`);
+    
+  const pieGenerator = d3.pie().value(d => d.value).sort(null);
+  const arcGenerator = d3.arc().innerRadius(pieRadius * 0.6).outerRadius(pieRadius);
+  
+  const pieCenterYear = pieGroup.append("text").attr("text-anchor", "middle").attr("y", -5).attr("font-size", "24px").attr("font-weight", "bold").attr("fill", "#fff");
+  const pieCenterTotal = pieGroup.append("text").attr("text-anchor", "middle").attr("y", 15).attr("font-size", "12px").attr("fill", "#afbddf");
 
   function draw(activeFormats) {
     const entries = [...activeFormats];
+    
+    const maxVal = entries.length > 0 ? d3.max(data, d => d3.max(entries, k => d[k])) : 1;
+    y.domain([0, maxVal * 1.1]); 
 
-    svg
-      .selectAll("path.dashboard-line")
-      .data(entries, (d) => d)
+    xAxisGroup.call(d3.axisBottom(x).ticks(6).tickFormat(d3.format("d")));
+    yAxisGroup.transition().duration(500).call(d3.axisLeft(y).ticks(5).tickFormat(d => "$" + d));
+    yGridGroup.transition().duration(500).call(d3.axisLeft(y).ticks(5).tickSize(-(lineChartWidth - margin.left - margin.right)).tickFormat(() => ""));
+
+    const group = linesGroup.selectAll("path.dashboard-line").data(entries, d => d);
+    group.join(
+      enter => enter.append("path").attr("class", "dashboard-line").attr("fill", "none").attr("stroke-width", 3).attr("stroke", d => colors[d]).attr("d", key => d3.line().x(d => x(d.Year)).y(d => y(d[key])).curve(d3.curveMonotoneX)(data)).style("opacity", 0).call(enter => enter.transition().duration(500).style("opacity", 1)),
+      update => update.transition().duration(500).attr("stroke", d => colors[d]).attr("d", key => d3.line().x(d => x(d.Year)).y(d => y(d[key])).curve(d3.curveMonotoneX)(data)),
+      exit => exit.transition().duration(300).style("opacity", 0).remove()
+    );
+    
+    updatePie(data[data.length - 1], entries);
+  }
+
+  function updatePie(yearData, activeFormats) {
+    let activeSum = 0;
+    const pieData = [];
+    
+    activeFormats.forEach(key => {
+      const val = yearData[key];
+      if (val > 0) {
+        pieData.push({ label: key, value: val, color: colors[key] });
+        activeSum += val;
+      }
+    });
+    
+    const otherValue = yearData.TotalRaw - activeSum;
+    if (otherValue > 0.01) pieData.push({ label: "Other Formats", value: otherValue, color: colors.Other });
+    
+    pieCenterYear.text(yearData.Year);
+    pieCenterTotal.text(`Total: $${yearData.TotalRaw.toFixed(1)}B`);
+
+    const slices = pieGroup.selectAll("path.slice").data(pieGenerator(pieData), d => d.data.label)
       .join(
-        (enter) =>
-          enter
-            .append("path")
-            .attr("class", "dashboard-line")
-            .attr("fill", "none")
-            .attr("stroke-width", 3)
-            .attr("stroke", (d) => colors[d])
-            .attr("d", (key) => linePath(key)),
-        (update) =>
-          update
-            .transition()
-            .duration(280)
-            .attr("stroke", (d) => colors[d])
-            .attr("d", (key) => linePath(key)),
-        (exit) => exit.remove()
+        enter => enter.append("path").attr("class", "slice").attr("fill", d => d.data.color).attr("d", arcGenerator).attr("stroke", "#0a0b10").attr("stroke-width", 2).style("cursor", "pointer"),
+        update => update.attr("d", arcGenerator),
+        exit => exit.remove()
       );
 
-    svg
-      .selectAll("path.dashboard-line-hit")
-      .data(entries, (d) => d)
-      .join(
-        (enter) =>
-          enter
-            .append("path")
-            .attr("class", "dashboard-line-hit")
-            .attr("fill", "none")
-            .attr("stroke", "transparent")
-            .attr("stroke-width", 18)
-            .attr("pointer-events", "stroke")
-            .style("cursor", "pointer")
-            .attr("d", (key) => linePath(key))
-            .on("mousemove", (event, key) => {
-              const [pointerX] = d3.pointer(event);
-              const yearRow = data[yearBisect(data, Math.round(x.invert(pointerX)))];
-              if (!yearRow || !yearRow[key]) return;
-              setHighlight(key, yearRow, event);
-            })
-            .on("mouseleave", clearHighlight),
-        (update) =>
-          update
-            .transition()
-            .duration(280)
-            .attr("d", (key) => linePath(key)),
-        (exit) => exit.remove()
-      );
+    slices
+      .on("mousemove", function(event, d) {
+        const total = d3.sum(pieData, p => p.value);
+        const pct = ((d.data.value / total) * 100).toFixed(1);
+        
+        let html = `<strong style="color: #fff; font-size: 1.1rem;">${labels[d.data.label] || d.data.label}</strong><br/>
+                    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
+                      <div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
+                         <span style="display:inline-block; width:10px; height:10px; background:${d.data.color}; margin-right:8px; border-radius:50%;"></span>
+                         <span>Revenue: <b style="color: #fff;">$${d.data.value.toFixed(2)}B</b></span>
+                      </div>
+                      <div style="color: #e2e8f0; font-size: 0.95rem; padding-left: 18px;">
+                         Market Share: <b style="color: #fff;">${pct}%</b>
+                      </div>
+                    </div>`;
+                    
+        const bounds = container.node().getBoundingClientRect();
+        let tooltipX = event.clientX - bounds.left + 20;
+        let tooltipY = event.clientY - bounds.top - 20;
+        
+        if (tooltipX + 180 > width) tooltipX = event.clientX - bounds.left - 180;
+        
+        tooltip.html(html).style("left", tooltipX + "px").style("top", tooltipY + "px").style("opacity", 1);
+        d3.select(this).attr("opacity", 0.7); 
+      })
+      .on("mouseout", function() {
+        tooltip.style("opacity", 0);
+        d3.select(this).attr("opacity", 1); 
+      });
   }
 
   draw(selected);
 
-  svg
-    .append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 6)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Year");
+  const bisectYear = d3.bisector(d => d.Year).left;
 
-  svg
-    .append("text")
-    .attr("x", -height / 2)
-    .attr("y", 20)
-    .attr("transform", "rotate(-90)")
-    .attr("text-anchor", "middle")
-    .attr("fill", "#afbddf")
-    .attr("font-size", 12)
-    .text("Revenue (value)");
+  const dragScrubber = d3.drag()
+    .on("start drag", (event) => {
+      if (selected.size === 0) return; 
+
+      const clampedX = Math.max(margin.left, Math.min(event.x, lineChartWidth - margin.right));
+      const x0 = x.invert(clampedX);
+
+      if (x0 < data[0].Year || x0 > data[data.length - 1].Year) return;
+
+      const i = bisectYear(data, x0, 1);
+      const d0 = data[i - 1];
+      const d1 = data[i] || d0;
+      const currentData = x0 - d0.Year > d1.Year - x0 ? d1 : d0;
+      const currentX = x(currentData.Year);
+
+      crosshair.attr("x1", currentX).attr("x2", currentX).style("opacity", 0.6);
+
+      updatePie(currentData, [...selected]);
+
+      const activeSorted = [...selected].sort((a, b) => currentData[b] - currentData[a]);
+      let html = `<strong style="color: #fff; font-size: 1.1rem;">Year: ${currentData.Year}</strong><br/>
+                  <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">`;
+      
+      activeSorted.forEach(key => {
+          const val = currentData[key];
+          if (val > 0) {
+              html += `<div style="color: #e2e8f0; font-size: 0.95rem; display: flex; align-items: center;">
+                         <span style="display:inline-block; width:10px; height:10px; background:${colors[key]}; margin-right:8px; border-radius:50%;"></span>
+                         <span>${labels[key]}: <b style="color: #fff;">$${val.toFixed(2)}B</b></span>
+                       </div>`;
+          }
+      });
+      html += `</div>`;
+
+      let tooltipX = clampedX + 20;
+      if (tooltipX + 160 > lineChartWidth) tooltipX = clampedX - 180; 
+
+      tooltip.html(html).style("left", tooltipX + "px").style("top", "20px").style("opacity", 1);
+    });
+
+  overlay.style("cursor", "ew-resize").call(dragScrubber);
 }
 
 function activateOnScroll() {
   const sections = document.querySelectorAll(".story-section");
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        entry.target.style.opacity = entry.isIntersecting ? "1" : "0.6";
-        entry.target.style.transform = entry.isIntersecting ? "translateY(0)" : "translateY(8px)";
-      });
-    },
-    { threshold: 0.2 }
-  );
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      entry.target.style.opacity = entry.isIntersecting ? "1" : "0.6";
+      entry.target.style.transform = entry.isIntersecting ? "translateY(0)" : "translateY(8px)";
+    });
+  }, { threshold: 0.2 });
 
   sections.forEach((section) => {
     section.style.transition = "opacity 280ms ease, transform 280ms ease";
@@ -1126,33 +614,32 @@ async function init() {
   cachedData = await loadStoryData();
   renderAllCharts(cachedData);
   activateOnScroll();
+  
+  const startBtn = document.getElementById("start-btn");
+  if (startBtn) {
+    startBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.body.classList.remove("scroll-locked");
+      document.querySelector("#section-hook").scrollIntoView({ behavior: "smooth" });
+    });
+  }
+
   window.addEventListener("resize", () => {
     if (!cachedData) return;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      renderAllCharts(cachedData);
-    }, 180);
+    resizeTimer = setTimeout(() => renderAllCharts(cachedData), 180);
   });
 }
 
 window.addEventListener("DOMContentLoaded", init);
 
-function clearChartContainers() {
-  CHART_CONTAINER_IDS.forEach((id) => {
-    const node = document.getElementById(id);
-    if (node) node.innerHTML = "";
-  });
-  const controls = document.getElementById("controls");
-  if (controls) controls.innerHTML = "";
-}
-
-// Renders all six charts (called on load and window resize)
 function renderAllCharts(data) {
-  clearChartContainers();
+  if (!data || data.length === 0) return;
+  renderHookChart(data);
+  renderVinylRebirth(data);
+  renderCdPeak(data);
+  renderDownloadMountain(data);
+  renderOwnershipAccess(data);
   renderStackedArea(data);
-  renderVinylTapeLine(data);
-  renderCdRevolution(data);
-  renderRevenueCollapse(data);
-  renderStreamingDominance(data);
   renderDashboard(data);
 }
