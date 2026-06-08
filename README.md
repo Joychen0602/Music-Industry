@@ -2,7 +2,7 @@
 
 ## Description
 
-This project presents an interactive data storytelling website that explores the evolution of the music industry from the 1970s to the present. Using historical revenue data from the Recording Industry Association of America (RIAA), the visualization demonstrates how different music formats—including vinyl records, cassette tapes, compact discs (CDs), digital downloads, and streaming services—rose and declined over time.
+This project presents an interactive data storytelling website that explores the evolution of the music industry from the 1970s to the present. Using historical revenue data from the Recording Industry Association of America (RIAA), the visualization demonstrates how different music formats-including vinyl records, cassette tapes, compact discs (CDs), digital downloads, and streaming services—rise and declined over time.
 
 The website follows a Martini Glass storytelling structure. The first part guides users through key stages of the industry's transformation, including the Vinyl & Tape Era, the CD Revolution, the Digital Disruption period, and the rise of Streaming Dominance. The final section provides an interactive exploration dashboard that allows users to compare revenue trends across multiple music formats and revisit major transitions in music consumption.
 
