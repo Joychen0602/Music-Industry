@@ -10,10 +10,10 @@ The website follows a Martini Glass storytelling structure. The first part guide
 
 ```text
 Music-Industry/
-├── index.html              # Main webpage
+├── main.html               # Main webpage
 ├── style.css               # Website styling
 ├── script.js               # Visualization and interaction logic
-├── musicdata.csv           # Music industry revenue dataset
+├── music_data.csv           # Music industry revenue dataset
 └── README.md               # Project documentation
 ```
 
@@ -32,7 +32,7 @@ cd Music-Industry
 
 ### Dataset
 
-The repository includes the processed music revenue dataset (`musicdata.csv`). No additional dataset download or preprocessing is required.
+The repository includes the processed music revenue dataset (`music_data.csv`). No additional dataset download or preprocessing is required.
 
 ## Execution
 
@@ -54,7 +54,7 @@ in a web browser.
 
 ### Option 2: Using Visual Studio Code
 
-Install the Live Server extension and open `index.html` using Live Server.
+Install the Live Server extension and open `main.html` using Live Server.
 
 ## Reproducibility
 
